@@ -12,6 +12,7 @@ from spatialgeometry import Sphere, Arrow, Mesh
 from roboticstoolbox import DHLink, DHRobot, models
 from ir_support import CylindricalDHRobotPlot 
 from ir_support.robots import UR3e
+from scenery import Scenery
 import os
 from math import pi
 
@@ -46,4 +47,22 @@ def setup_scene():
     env.set_camera_pose([3.0, -2.0, 2.2], [0.4, 0.2, 0.3])  # (position, look-at)
     
 
+if __name__ == "__main__":
+    env = swift.Swift()
+    env.launch(realtime=True)
     
+    scenery = Scenery()
+    scenery.add_to_env(env)
+    
+    env.step(1)
+    
+    scenery.move1(env)
+    env.step(1)
+    
+    scenery.move2(env)
+    env.step(1)
+    
+    scenery.home(env)
+    
+    while True:
+        env.step(0.05)
