@@ -77,26 +77,30 @@ def main():
     add_bucket(env, GREEN_BUCKET_POSE, "green")
     add_bucket(env, BLUE_BUCKET_POSE, "blue")
 
-    obj_colour = random.choice(TX2_60.COLOURS)
-    part = Sphere(
-        radius=PART_RADIUS,
-        pose=GENERAL_BUCKET_POSE,
-        color=obj_colour,
-    )
-    env.add(part)
-    env.step(1)
-    print(f"Randomly selected part colour: {obj_colour}")
+    def spawn_part():
+        """Create a new randomly-coloured part in the general bucket and queue it for sorting."""
+        obj_colour = random.choice(TX2_60.COLOURS)
+        part = Sphere(
+            radius=PART_RADIUS,
+            pose=GENERAL_BUCKET_POSE,
+            color=obj_colour,
+        )
+        env.add(part)
+        print(f"Randomly selected part colour: {obj_colour}")
+        tx2_60.queue_part(part, obj_colour)
 
-    tx2_60.sort_part(
+    def on_sorted(obj, obj_colour):
+        """Spawn a replacement part once the previous one has been picked and placed."""
+        spawn_part()
+
+    spawn_part()
+
+    tx2_60.run(
         env,
-        part,
-        obj_colour,
         GENERAL_BUCKET_POSE,
         COLOUR_BUCKET_POSES,
+        on_sorted=on_sorted,
     )
-
-    while True:
-        env.step(0.05)
 
 
 if __name__ == "__main__":

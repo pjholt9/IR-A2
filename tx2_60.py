@@ -18,6 +18,9 @@ class TX2_60:
         # Object currently held by the gripper, and the grasp offset relative to the end-effector
         self.attached_object = None
         self.grasp_offset = SE3()
+        # Queue of (obj, obj_colour) tuples awaiting sorting, and a busy flag for run()
+        self.pending_parts = []
+        self.busy = False
 
     def update_base(self):
         """Sync the robot's base transform with self.base."""
@@ -111,3 +114,22 @@ class TX2_60:
         self.pick(obj, env, steps=steps)
         self.place(bucket_pose, env, steps=steps)
         return obj_colour
+
+    def queue_part(self, obj, obj_colour):
+        """Add a part to the queue of parts awaiting sorting."""
+        self.pending_parts.append((obj, obj_colour))
+
+    def run(self, env, general_bucket_pose, colour_bucket_poses, steps=50, idle_step=0.05, on_sorted=None):
+        """Continuously sort queued parts, only checking for new work once idle (not mid pick-and-place)."""
+        while True:
+            if not self.pending_parts:
+                env.step(idle_step)
+                continue
+
+            self.busy = True
+            obj, obj_colour = self.pending_parts.pop(0)
+            self.sort_part(env, obj, obj_colour, general_bucket_pose, colour_bucket_poses, steps=steps)
+            self.busy = False
+
+            if on_sorted is not None:
+                on_sorted(obj, obj_colour)
