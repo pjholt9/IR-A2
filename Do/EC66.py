@@ -12,7 +12,7 @@ class EC66:
         
         self.base = base
 
-        self.q_stanby = np.zeros(6)
+        self.q_standby = np.deg2rad([0, -45, -120, 0, 0, 0])
         
     def update_base(self):
         self.robot.base = self.base
@@ -32,7 +32,7 @@ class EC66:
         return self.robot
     
     def standby(self):
-        self.robot.q = self.q_stanby.copy()
+        self.robot.q = self.q_standby.copy()
         
     def create_mesh_robot(self, env):
         self.update_base()

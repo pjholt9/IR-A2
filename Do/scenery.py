@@ -7,6 +7,8 @@ from printer import Printer
 from rail import Rail
 from linear_platform import Linear_Platform
 from EC66 import EC66
+from build_plate import BuildPlate
+from door import Door
 import numpy as np
 
 class Scenery:
@@ -15,7 +17,7 @@ class Scenery:
         self.printer1 = Printer(pose=self.table.pose @ SE3(1.575, -0.35, 0.75) @ SE3.Rz(pi))
         self.printer2 = Printer(pose=self.table.pose @ SE3(1.045, -0.35, 0.75) @ SE3.Rz(pi))
         self.printer3 = Printer(pose=self.table.pose @ SE3(0.515, -0.35, 0.75) @ SE3.Rz(pi))
-        self.robot_offset = SE3(0.125, 0.1, 0.05)
+        self.robot_offset = SE3(0.125, 0.1, 0.05) @ SE3.Rz(pi/2)
         self.platform = Linear_Platform(pose= self.table.pose @ SE3(0.06, -0.18, 0.68))
         self.ec66 = EC66(base=self.platform.pose @ self.robot_offset)
         self.robot = None
@@ -49,6 +51,5 @@ class Scenery:
         self.printer3.add_to_env(env)
         self.platform.add_to_env(env)
         self.robot = self.ec66.create_robot()
-        self.robot.q = np.deg2rad([0, -45, -90, 0, 0, 0])
         self.ec66.create_mesh_robot(env)
         # self.rail.add_to_env(env)
