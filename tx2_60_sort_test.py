@@ -1,17 +1,15 @@
-import random
-
 import numpy as np
 import swift
 from spatialgeometry import Cuboid, Sphere
 from spatialmath import SE3
 
-from a2 import (
-    BLUE_BUCKET_POSE,
-    COLOUR_BUCKET_POSES,
+from bucket_poses import (
+    BLACK_BUCKET_POSE,
+    BROWN_BUCKET_POSE,
     GENERAL_BUCKET_POSE,
-    GREEN_BUCKET_POSE,
-    RED_BUCKET_POSE,
+    IMAGE_COLOUR_BUCKET_POSES,
 )
+from colour_sort import SimulatedCamera
 from tx2_60 import TX2_60
 
 
@@ -73,24 +71,37 @@ def main():
     tx2_60.create_mesh_robot(env)
 
     add_bucket(env, GENERAL_BUCKET_POSE, "dimgray")
-    add_bucket(env, RED_BUCKET_POSE, "red")
-    add_bucket(env, GREEN_BUCKET_POSE, "green")
-    add_bucket(env, BLUE_BUCKET_POSE, "blue")
+    add_bucket(env, BLACK_BUCKET_POSE, "black")
+    add_bucket(env, BROWN_BUCKET_POSE, "saddlebrown")
+
+    camera = SimulatedCamera()
+
+    # Keep the camera window responsive while the arm animates
+    swift_step = env.step
+
+    def step_and_pump(*args, **kwargs):
+        swift_step(*args, **kwargs)
+        camera.pump()
+
+    env.step = step_and_pump
 
     def spawn_part():
-        """Create a new randomly-coloured part in the general bucket and queue it for sorting."""
-        obj_colour = random.choice(TX2_60.COLOURS)
+        """Raise the object flag, show/classify a random camera image, and queue a part of that colour."""
+        camera.object_present = True
+        obj_colour = camera.detect_colour()
+        camera.object_present = False
         part = Sphere(
             radius=PART_RADIUS,
             pose=GENERAL_BUCKET_POSE,
-            color=obj_colour,
+            color=camera.last_rgb,
         )
         env.add(part)
-        print(f"Randomly selected part colour: {obj_colour}")
+        print(f"Detected part colour: {obj_colour}")
         tx2_60.queue_part(part, obj_colour)
 
     def on_sorted(obj, obj_colour):
-        """Spawn a replacement part once the previous one has been picked and placed."""
+        """Close the image once the part is in its bucket, then bring in the next part."""
+        camera.close_image()
         spawn_part()
 
     spawn_part()
@@ -98,7 +109,7 @@ def main():
     tx2_60.run(
         env,
         GENERAL_BUCKET_POSE,
-        COLOUR_BUCKET_POSES,
+        IMAGE_COLOUR_BUCKET_POSES,
         on_sorted=on_sorted,
     )
 

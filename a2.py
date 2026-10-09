@@ -17,17 +17,17 @@ from tx2_60 import TX2_60
 import os
 from math import pi
 
-# World-frame part and drop poses in metres; adjust to match the scene.
-GENERAL_BUCKET_POSE = SE3(0.55, 0.0, 0.10)
-GREEN_BUCKET_POSE = SE3(0.25, 0.40, 0.10)
-RED_BUCKET_POSE = SE3(0.25, 0.0, 0.10)
-BLUE_BUCKET_POSE = SE3(0.25, -0.40, 0.10)
-OBJ_COLOUR = "red"
-COLOUR_BUCKET_POSES = {
-    "green": GREEN_BUCKET_POSE,
-    "red": RED_BUCKET_POSE,
-    "blue": BLUE_BUCKET_POSE,
-}
+from bucket_poses import (
+    BLACK_BUCKET_POSE,
+    BLUE_BUCKET_POSE,
+    BROWN_BUCKET_POSE,
+    COLOUR_BUCKET_POSES,
+    GENERAL_BUCKET_POSE,
+    GREEN_BUCKET_POSE,
+    IMAGE_COLOUR_BUCKET_POSES,
+    OBJ_COLOUR,
+    RED_BUCKET_POSE,
+)
 
 #************************SCENE SETUP******************************
 def setup_scene():

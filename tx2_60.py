@@ -7,7 +7,7 @@ from ir_support import CylindricalDHRobotPlot
 
 
 class TX2_60:
-    COLOURS = ("red", "green", "blue")
+    COLOURS = ("red", "green", "blue", "black", "brown")
     APPROACH_HEIGHT = 0.15
 
     def __init__(self, base=SE3()):
@@ -100,15 +100,10 @@ class TX2_60:
 
     def sort_part(self, env, obj, obj_colour, general_bucket_pose, colour_bucket_poses, steps=50):
         """Pick a part from the known general-bucket pose and place it in its colour bucket."""
-        if obj_colour not in self.COLOURS:
-            raise ValueError(f"obj_colour must be one of {self.COLOURS}")
+        if obj_colour not in self.COLOURS or obj_colour not in colour_bucket_poses:
+            raise ValueError(f"obj_colour must be one of {self.COLOURS} with a bucket pose")
 
-        if obj_colour == "red":
-            bucket_pose = colour_bucket_poses["red"]
-        elif obj_colour == "blue":
-            bucket_pose = colour_bucket_poses["blue"]
-        else:
-            bucket_pose = colour_bucket_poses["green"]
+        bucket_pose = colour_bucket_poses[obj_colour]
 
         obj.T = SE3(general_bucket_pose).A
         self.pick(obj, env, steps=steps)
