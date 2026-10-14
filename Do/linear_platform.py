@@ -14,7 +14,7 @@ class Linear_Platform:
         self.station1 = self.home_pose @ SE3(0.42, 0, 0)
         self.station2 = self.home_pose @ SE3(0.90, 0, 0)
         
-        self.platform = Mesh(filename=str(MODEL_DIR / 'Platform.stl'), scale=0.001)
+        self.platform = Mesh(filename=str(MODEL_DIR / 'Platform.stl'), scale=[0.001, 0.001, 0.001])
         self.platform._collision = False
         self.update_pose(self.home_pose)
         

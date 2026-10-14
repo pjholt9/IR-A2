@@ -2,13 +2,13 @@ import swift
 from spatialgeometry import Mesh
 from spatialmath import SE3
 from math import pi
-from table import Table
-from printer import Printer
-from rail import Rail
-from linear_platform import Linear_Platform
-from EC66 import EC66
-from build_plate import BuildPlate
-from door import Door
+from .table import Table
+from .printer import Printer
+from .rail import Rail
+from .linear_platform import Linear_Platform
+from .EC66 import EC66
+from .build_plate import BuildPlate
+from .door import Door
 import numpy as np
 
 class Scenery:

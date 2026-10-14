@@ -11,7 +11,10 @@ class BuildPlate:
         self.pose = pose
 
         self.plate = Mesh(
-            filename=str(MODEL_DIR / "Build Plate.STL"), scale=0.001, color="#FFD700")
+            filename=str(MODEL_DIR / "Build Plate.STL"),
+            scale=[0.001, 0.001, 0.001],
+            color="#FFD700",
+        )
 
         self.plate._collision = False
         self.update_pose(self.pose)

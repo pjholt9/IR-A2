@@ -18,7 +18,7 @@ class Door:
 
         self.door = Mesh(
             filename=str(MODEL_DIR / "Door.stl"),
-            scale=0.001,
+            scale=[0.001, 0.001, 0.001],
             color=[0.15, 0.15, 0.15, 0.35]
         )
         

@@ -2,8 +2,8 @@ from spatialgeometry import Mesh
 from spatialmath import SE3
 from math import pi
 from pathlib import Path
-from door import Door
-from build_plate import BuildPlate
+from .door import Door
+from .build_plate import BuildPlate
 
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"
@@ -11,7 +11,7 @@ MODEL_DIR = Path(__file__).resolve().parent / "models"
 class Printer:
     def __init__(self, pose = SE3()):
         self.pose = pose
-        self.body = Mesh(filename=str(MODEL_DIR / 'P1S_Correct.stl'), scale=0.001)
+        self.body = Mesh(filename=str(MODEL_DIR / 'P1S_Correct.stl'), scale=[0.001, 0.001, 0.001])
         self.door = Door(hinge_pose=self.pose @ SE3(0.035, 0.004, 0.03))
         self.build_plate = BuildPlate(pose=self.pose @ SE3(0.065, 0.03, 0.25))
         self.body._collision = False
