@@ -4,11 +4,14 @@ from math import pi
 from spatialmath import SE3
 from roboticstoolbox import DHRobot, DHLink, jtraj
 from ir_support import CylindricalDHRobotPlot
+from collision import in_collision
 
 
 class TX2_60:
     COLOURS = ("red", "green", "blue", "black", "brown")
     APPROACH_HEIGHT = 0.15
+    WAIT_STEP = 0.05
+    MAX_WAIT = 60.0
 
     def __init__(self, base=SE3()):
         self.robot = None
@@ -21,6 +24,16 @@ class TX2_60:
         # Queue of (obj, obj_colour) tuples awaiting sorting, and a busy flag for run()
         self.pending_parts = []
         self.busy = False
+        # Cuboid obstacles checked against link ellipsoids, and callbacks (dt) that animate them
+        self.obstacles = []
+        self.step_hooks = []
+        self.waiting = False
+
+    def add_obstacle(self, cuboid, update=None):
+        """Register a cuboid to avoid; update(dt) is an optional callback that moves it each step."""
+        self.obstacles.append(cuboid)
+        if update is not None:
+            self.step_hooks.append(update)
 
     def update_base(self):
         """Sync the robot's base transform with self.base."""
@@ -61,11 +74,27 @@ class TX2_60:
         """Animate a joint-space move, dragging any attached object along with the end-effector."""
         q_traj = jtraj(self.robot.q, q_target, steps).q
         for q in q_traj:
+            self._wait_until_clear(env, q)
             self.robot.q = q
             if self.attached_object is not None:
                 self.attached_object.T = self.get_ee_pose() @ self.grasp_offset
             env.step(0.02)
+            for hook in self.step_hooks:
+                hook(0.02)
         return self.robot.q
+
+    def _wait_until_clear(self, env, q):
+        """Hold the arm still while moving to q would put a link ellipsoid inside an obstacle."""
+        waited = 0.0
+        while self.obstacles and in_collision(self.robot, q, self.obstacles):
+            if waited >= self.MAX_WAIT:
+                raise RuntimeError("Path blocked by obstacle for too long")
+            self.waiting = True
+            env.step(self.WAIT_STEP)
+            for hook in self.step_hooks:
+                hook(self.WAIT_STEP)
+            waited += self.WAIT_STEP
+        self.waiting = False
 
     def move_to_pose(self, env, target_pose, steps=50):
         """Solve IK for a Cartesian target pose, then animate the move to it."""

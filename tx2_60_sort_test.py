@@ -1,8 +1,9 @@
 import numpy as np
 import swift
-from spatialgeometry import Cuboid, Sphere
+from spatialgeometry import Cuboid
 from spatialmath import SE3
 
+from parts import PART_COLOURS, make_part
 from bucket_poses import (
     BLACK_BUCKET_POSE,
     BROWN_BUCKET_POSE,
@@ -71,7 +72,7 @@ def main():
     tx2_60.create_mesh_robot(env)
 
     add_bucket(env, GENERAL_BUCKET_POSE, "dimgray")
-    add_bucket(env, BLACK_BUCKET_POSE, "black")
+    add_bucket(env, BLACK_BUCKET_POSE, PART_COLOURS["black"])
     add_bucket(env, BROWN_BUCKET_POSE, "saddlebrown")
 
     camera = SimulatedCamera()
@@ -90,11 +91,7 @@ def main():
         camera.object_present = True
         obj_colour = camera.detect_colour()
         camera.object_present = False
-        part = Sphere(
-            radius=PART_RADIUS,
-            pose=GENERAL_BUCKET_POSE,
-            color=camera.last_rgb,
-        )
+        part = make_part(obj_colour, GENERAL_BUCKET_POSE)
         env.add(part)
         print(f"Detected part colour: {obj_colour}")
         tx2_60.queue_part(part, obj_colour)
