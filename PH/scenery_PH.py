@@ -3,7 +3,10 @@ from ir_support_extra_parts.parts import part_mesh
 from spatialgeometry import Cuboid
 from spatialmath import SE3
 
-from tx2_60 import TX2_60
+if __package__:
+    from .tx2_60 import TX2_60
+else:
+    from tx2_60 import TX2_60
 
 
 BUCKET_WIDTH = 0.24

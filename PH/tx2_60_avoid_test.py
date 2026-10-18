@@ -4,8 +4,12 @@ import numpy as np
 from spatialgeometry import Cuboid
 from spatialmath import SE3
 
-from collision import in_collision
-from tx2_60 import TX2_60
+if __package__:
+    from .collision import in_collision
+    from .tx2_60 import TX2_60
+else:
+    from collision import in_collision
+    from tx2_60 import TX2_60
 
 START_Q = np.deg2rad([0, -90, 0, 0, 0, 0])
 TARGET_Q = np.deg2rad([90, -45, 45, 0, 0, 0])

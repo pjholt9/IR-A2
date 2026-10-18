@@ -13,7 +13,7 @@ from roboticstoolbox import DHLink, DHRobot, models
 from ir_support import CylindricalDHRobotPlot 
 from ir_support.robots import UR3e
 from Do.scenery import Scenery as SceneryDo
-from scenery_PH import SceneryPH
+from PH.scenery_PH import SceneryPH
 import os
 from math import pi
 

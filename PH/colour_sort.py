@@ -3,6 +3,7 @@ import os
 import random
 
 import numpy as np
+from scipy import ndimage
 
 BROWN = "brown"
 BLACK = "black"
@@ -16,6 +17,8 @@ _REFERENCE = {
 BLACK_MAX_VALUE = 0.20
 BROWN_HUE_RANGE_DEG = (10.0, 45.0)
 BROWN_MIN_SATURATION = 0.30
+WHITE_BACKGROUND_MAX_SATURATION = 0.12
+DARK_FOREGROUND_MAX_VALUE = 60
 
 
 def _to_unit_rgb(rgb):
@@ -58,9 +61,18 @@ def classify_image_file(path):
 class SimulatedCamera:
     """Stand-in for a real camera: when the object flag is raised, 'captures' one of the image files at random."""
 
-    def __init__(self, folder=None, filenames=("black.png", "brown.png")):
+    def __init__(
+        self,
+        folder=None,
+        filenames=("black.png", "brown.png"),
+        white_saturation_threshold=WHITE_BACKGROUND_MAX_SATURATION,
+        dark_pixel_threshold=DARK_FOREGROUND_MAX_VALUE,
+    ):
+        """Set the image source and thresholds for excluding the white background."""
         folder = folder or os.path.dirname(os.path.abspath(__file__))
         self.image_paths = [os.path.join(folder, name) for name in filenames]
+        self.white_saturation_threshold = white_saturation_threshold
+        self.dark_pixel_threshold = dark_pixel_threshold
         self.object_present = False
         self.last_rgb = None
         self._fig = None
@@ -77,9 +89,33 @@ class SimulatedCamera:
 
         path = self.capture()
         with Image.open(path) as img:
-            pixels = np.asarray(img.convert("RGB"))
-        colour = classify_image(pixels)
-        self.last_rgb = tuple(float(c) for c in np.median(pixels.reshape(-1, 3), axis=0) / 255.0)
+            pixels = np.asarray(img.convert("RGB"), dtype=float)
+        max_channel = pixels.max(axis=2)
+        min_channel = pixels.min(axis=2)
+        saturation = np.divide(
+            max_channel - min_channel,
+            max_channel,
+            out=np.zeros_like(max_channel),
+            where=max_channel > 0,
+        )
+        foreground = (saturation >= self.white_saturation_threshold) | (
+            max_channel <= self.dark_pixel_threshold
+        )
+        labels, _ = ndimage.label(foreground)
+        component_sizes = np.bincount(labels.ravel())
+        component_sizes[0] = 0
+        largest_component = int(component_sizes.argmax())
+        foreground = labels == largest_component
+        if not foreground.any():
+            raise ValueError(
+                f"No part foreground found in {path}; check the white-background "
+                "segmentation thresholds."
+            )
+        colour_pixels = pixels[foreground]
+        colour = classify_image(pixels, mask=foreground)
+        self.last_rgb = tuple(
+            float(c) for c in np.median(colour_pixels, axis=0) / 255.0
+        )
         print(f"Camera image {os.path.basename(path)} -> {colour}")
         self.show_image(pixels, f"Camera: {os.path.basename(path)} -> {colour}")
         return colour

@@ -1,22 +1,51 @@
-import numpy as np
-
 from math import pi
+from pathlib import Path
+
+import numpy as np
 from spatialmath import SE3
 from roboticstoolbox import DHRobot, DHLink, jtraj
 from ir_support import CylindricalDHRobotPlot
-from collision import in_collision
+from spatialgeometry import Mesh
+
+if __package__:
+    from .collision import in_collision
+else:
+    from collision import in_collision
 
 
 class TX2_60:
     COLOURS = ("red", "green", "blue", "black", "brown")
+    MESH_COLOR = "#3478f6"
+    MESH_FILES = (
+        "base_link.STL",
+        "one_Link.STL",
+        "two_Link.STL",
+        "three_Link.STL",
+        "four_Link.STL",
+        "five_Link.STL",
+        "six_Link.STL",
+    )
+    MESH_OFFSETS = (
+        SE3.RPY([-pi / 2, 0, 0], order="zyx"),
+        SE3(-0.05, 0, 0),
+        SE3(-0.665, -0.05, 0) * SE3.RPY([0, 0, pi / 2], order="zyx"),
+        SE3(0.03, -0.02, 0) * SE3.RPY([-pi / 2, 0, pi], order="zyx"),
+        SE3(0.03, -0.31, 0.02) * SE3.RPY([pi / 2, 0, pi], order="zyx"),
+        SE3(0.03, -0.02, 0) * SE3.RPY([-pi / 2, 0, pi], order="zyx"),
+        SE3(0.03, -0.02, -0.01) * SE3.RPY([0, 0, pi], order="zyx"),
+    )
     APPROACH_HEIGHT = 0.15
     WAIT_STEP = 0.05
     MAX_WAIT = 60.0
 
-    def __init__(self, base=SE3()):
+    def __init__(self, base=SE3(), use_meshes=True):
         self.robot = None
         self.tx2_60_plot = None
         self.base = base
+        self.use_meshes = use_meshes
+        self.using_meshes = False
+        self.base_mesh = None
+        self.link_meshes = []
         self.q_standby = np.zeros(6)
         # Object currently held by the gripper, and the grasp offset relative to the end-effector
         self.attached_object = None
@@ -38,6 +67,9 @@ class TX2_60:
     def update_base(self):
         """Sync the robot's base transform with self.base."""
         self.robot.base = self.base
+        if self.base_mesh is not None:
+            self.base_mesh.T = self.base * self.MESH_OFFSETS[0]
+            self.base_mesh._changed = True
         return self.robot.base
 
     def create_robot(self):
@@ -59,10 +91,49 @@ class TX2_60:
         self.robot.q = self.q_standby.copy()
 
     def create_mesh_robot(self, env):
-        """Create the cylindrical visual mesh for the robot and add it to the Swift environment."""
+        """Add STL link visuals, or the cylinder fallback, to the Swift environment."""
         self.update_base()
+        mesh_dir = Path(__file__).resolve().parent / "TX2_60meshes"
+        missing = [
+            mesh_dir / filename
+            for filename in self.MESH_FILES
+            if not (mesh_dir / filename).is_file()
+        ]
+
+        if self.use_meshes and not missing:
+            self.link_meshes = []
+            for link_index, filename in enumerate(self.MESH_FILES[1:]):
+                mesh = Mesh(
+                    str(mesh_dir / filename),
+                    pose=self.MESH_OFFSETS[link_index + 1],
+                    color=self.MESH_COLOR,
+                )
+                link = self.robot.links[link_index]
+                link.geometry = [*link.geometry, mesh]
+                self.link_meshes.append(mesh)
+
+            self.base_mesh = Mesh(
+                str(mesh_dir / self.MESH_FILES[0]),
+                pose=self.base * self.MESH_OFFSETS[0],
+                color=self.MESH_COLOR,
+            )
+            env.add(self.robot)
+            env.add(self.base_mesh)
+            self.using_meshes = True
+            return
+
+        if self.use_meshes and missing:
+            missing_names = ", ".join(path.name for path in missing)
+            print(
+                "Warning: TX2-60 mesh file(s) missing "
+                f"({missing_names}); falling back to cylindrical visuals."
+            )
+
+        self.base_mesh = None
+        self.link_meshes = []
+        self.using_meshes = False
         self.tx2_60_plot = CylindricalDHRobotPlot(
-            self.robot, cylinder_radius=0.05, color="#3478f6"
+            self.robot, cylinder_radius=0.05, color=self.MESH_COLOR
         ).create_cylinders()
         env.add(self.tx2_60_plot)
 
