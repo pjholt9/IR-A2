@@ -5,9 +5,13 @@ from spatialgeometry import Cuboid
 from spatialmath import SE3
 
 if __package__:
-    from .collision import in_collision
-    from .tx2_60 import TX2_60
+    from ..collision import in_collision
+    from ..tx2_60 import TX2_60
 else:
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from collision import in_collision
     from tx2_60 import TX2_60
 

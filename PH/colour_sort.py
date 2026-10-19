@@ -19,6 +19,7 @@ BROWN_HUE_RANGE_DEG = (10.0, 45.0)
 BROWN_MIN_SATURATION = 0.30
 WHITE_BACKGROUND_MAX_SATURATION = 0.12
 DARK_FOREGROUND_MAX_VALUE = 60
+DISPLAY_PADDING_PX = 20
 
 
 def _to_unit_rgb(rgb):
@@ -81,13 +82,13 @@ class SimulatedCamera:
         """Return the path of a randomly selected image, as if photographing the object."""
         return random.choice(self.image_paths)
 
-    def detect_colour(self):
+    def detect_colour(self, image_path=None):
         """If the object flag is set, capture an image, show it, and return its classified colour, else None."""
         if not self.object_present:
             return None
         from PIL import Image
 
-        path = self.capture()
+        path = self.capture() if image_path is None else os.fspath(image_path)
         with Image.open(path) as img:
             pixels = np.asarray(img.convert("RGB"), dtype=float)
         max_channel = pixels.max(axis=2)
@@ -117,7 +118,13 @@ class SimulatedCamera:
             float(c) for c in np.median(colour_pixels, axis=0) / 255.0
         )
         print(f"Camera image {os.path.basename(path)} -> {colour}")
-        self.show_image(pixels, f"Camera: {os.path.basename(path)} -> {colour}")
+        # Show only the part: crop to the mask's bounding box (plus padding) so the white background isn't displayed
+        rows, cols = np.where(foreground)
+        pad = DISPLAY_PADDING_PX
+        top, bottom = max(rows.min() - pad, 0), min(rows.max() + pad + 1, pixels.shape[0])
+        left, right = max(cols.min() - pad, 0), min(cols.max() + pad + 1, pixels.shape[1])
+        cropped = pixels[top:bottom, left:right].astype(np.uint8)
+        self.show_image(cropped, f"Camera: {os.path.basename(path)} -> {colour}")
         return colour
 
     def show_image(self, pixels, title):

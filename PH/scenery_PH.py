@@ -16,20 +16,21 @@ FLOOR_THICKNESS = 0.02
 TABLE_TOP = 0.5
 PART_RADIUS = 0.035
 START_Q = np.deg2rad([0, -90, 0, 0, 0, 0])
-COLOURS = ("black", "blue", "brown", "green", "red")
+# Only the colours the camera and part models currently support get a bucket
+COLOURS = ("black", "brown")
 DRAW_COLOURS = {
     "black": "black",
-    "blue": "blue",
     "brown": "saddlebrown",
-    "green": "green",
-    "red": "red",
 }
 
 ROBOT_LOCAL = SE3(0.0, 0.0, TABLE_TOP)
 GENERAL_LOCAL = SE3(0.0, -0.5, TABLE_TOP + FLOOR_THICKNESS + PART_RADIUS)
 ARC_RADIUS = 0.5
 ARC_CENTRE = np.deg2rad(90)
-ARC_HALF_SPAN = np.deg2rad(75)
+ARC_HALF_SPAN = np.deg2rad(28)
+# E-stop in the table corner on the bucket (+y) side, beyond the arm's ~0.95 m reach
+ESTOP_LOCAL_XY = (0.9, 0.58)
+ESTOP_SIZE = 0.12  # approximate collision box for the e-stop mesh
 GENERAL_WORLD_XY = (-0.6, 0.85)
 TABLE_POSE = SE3(
     GENERAL_WORLD_XY[0] - GENERAL_LOCAL.t[0],
@@ -52,6 +53,7 @@ class SceneryPH:
         )
         self.robot = None
         self.buckets = {}
+        self.estop = None
 
         self.general_bucket_pose = self.table_pose @ GENERAL_LOCAL
         angles = np.linspace(
@@ -85,7 +87,30 @@ class SceneryPH:
             self.buckets[colour] = self._add_bucket(
                 env, pose, DRAW_COLOURS[colour]
             )
+        self.estop = part_mesh(
+            "emergencyStopButton",
+            pose=self.table_pose @ SE3(*ESTOP_LOCAL_XY, TABLE_TOP),
+        )
+        env.add(self.estop)
         return self.tx2_60
+
+    def register_obstacles(self):
+        """Register the table top, buckets and e-stop as collision obstacles for the arm."""
+        # Invisible slabs/boxes: only used by the ellipsoid collision check, never added to Swift
+        # Top sits 3 cm below the surface so the base column's own ellipsoid tip isn't flagged
+        table_top = Cuboid(
+            scale=[2.1, 1.4, 0.04],
+            pose=self.table_pose @ SE3(0, 0, TABLE_TOP - 0.05),
+        )
+        estop_box = Cuboid(
+            scale=[ESTOP_SIZE, ESTOP_SIZE, ESTOP_SIZE],
+            pose=self.table_pose @ SE3(*ESTOP_LOCAL_XY, TABLE_TOP + ESTOP_SIZE / 2),
+        )
+        for obstacle in [table_top, estop_box]:
+            self.tx2_60.add_obstacle(obstacle)
+        for pieces in self.buckets.values():
+            for piece in pieces:
+                self.tx2_60.add_obstacle(piece)
 
     @staticmethod
     def _add_bucket(env, pose, colour):

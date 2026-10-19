@@ -10,8 +10,11 @@ from swift import Swift
 
 if __package__:
     from .calibrate_tx2_meshes import find_reference
-    from .tx2_60 import TX2_60
+    from ..tx2_60 import TX2_60
 else:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from calibrate_tx2_meshes import find_reference
     from tx2_60 import TX2_60
 
@@ -44,7 +47,7 @@ def test_configurations(tx2_60):
 
 
 def load_mesh_vertices():
-    mesh_dir = Path(__file__).resolve().parent / "TX2_60meshes"
+    mesh_dir = Path(__file__).resolve().parents[1] / "TX2_60meshes"
     meshes = []
     for filename in TX2_60.MESH_FILES:
         path = mesh_dir / filename

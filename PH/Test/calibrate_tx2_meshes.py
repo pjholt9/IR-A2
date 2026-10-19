@@ -8,12 +8,15 @@ import numpy as np
 from spatialmath import SE3
 
 if __package__:
-    from .tx2_60 import TX2_60
+    from ..tx2_60 import TX2_60
 else:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tx2_60 import TX2_60
 
 
-MESH_DIR = Path(__file__).resolve().parent / "TX2_60meshes"
+MESH_DIR = Path(__file__).resolve().parents[1] / "TX2_60meshes"
 URDF_ORIGINS = (
     ((0, -0.375, 0), (0, 0, 0)),
     ((0, 0.375, 0), (0, 0, 0)),

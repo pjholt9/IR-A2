@@ -6,16 +6,19 @@ from spatialgeometry import Cuboid
 from spatialmath import SE3
 
 if __package__:
-    from .parts import PART_COLOURS, make_part
-    from .bucket_poses import (
+    from ..parts import PART_COLOURS, make_part
+    from ..bucket_poses import (
         BLACK_BUCKET_POSE,
         BROWN_BUCKET_POSE,
         GENERAL_BUCKET_POSE,
         IMAGE_COLOUR_BUCKET_POSES,
     )
-    from .colour_sort import SimulatedCamera
-    from .tx2_60 import TX2_60
+    from ..colour_sort import SimulatedCamera
+    from ..tx2_60 import TX2_60
 else:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from parts import PART_COLOURS, make_part
     from bucket_poses import (
         BLACK_BUCKET_POSE,
@@ -89,7 +92,7 @@ def main():
     add_bucket(env, BROWN_BUCKET_POSE, "saddlebrown")
 
     camera = SimulatedCamera(
-        folder=Path(__file__).resolve().parent / "part_images",
+        folder=Path(__file__).resolve().parents[1] / "part_images",
         filenames=("BlackPart.jpg", "BrownPart.jpg"),
     )
 
