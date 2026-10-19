@@ -18,16 +18,21 @@ if __package__:
     from ..colour_sort import SimulatedCamera
     from ..manual_control import run_manual_control
     from ..parts import make_part
+    from ..safety import EStop
     from ..scenery_PH import TABLE_TOP, SceneryPH
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from colour_sort import SimulatedCamera
     from manual_control import run_manual_control
     from parts import make_part
+    from safety import EStop
     from scenery_PH import TABLE_TOP, SceneryPH
 
 # Set True to drive the joints by hand from a slider window instead of auto-sorting
 MANUAL_CONTROL = False
+
+# Set True to open a separate E-STOP window that halts the arm during automatic running
+ESTOP_GUI = True
 
 # Set True to have an apple fly across the workcell, so the arm has to wait for it to clear
 APPLE_OBSTACLE = True
@@ -60,6 +65,10 @@ def main():
     )
 
     # Keep the camera window responsive while the arm animates; also drives the apple's clock
+    estop = None
+    if ESTOP_GUI and not args.headless and not MANUAL_CONTROL:
+        estop = EStop()
+        tx2_60.safety = estop
     swift_step = env.step
     apple = {"t": 0.0, "mesh": None}
 
@@ -83,6 +92,8 @@ def main():
     def step_and_pump(*args_, **kwargs):
         swift_step(*args_, **kwargs)
         camera.pump()
+        if estop is not None:
+            estop.pump()
         if APPLE_OBSTACLE:
             # Every env.step (moving, waiting or idle) advances the simulation clock
             dt = args_[0] if args_ else kwargs.get("dt", 0.05)

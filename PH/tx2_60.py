@@ -77,6 +77,8 @@ class TX2_60:
         self.sensing = False
         self.known_objects = set()
         self.sensed = {}
+        # Optional EStop (PH/safety.py): while it is latched the arm holds still every step
+        self.safety = None
         self.sense_size = 0.12
 
     def enable_sensing(self, env, size=0.12):
@@ -195,6 +197,7 @@ class TX2_60:
         for q in q_traj:
             # Collision avoidance: check this step before moving, hold still if blocked
             self._wait_until_clear(env, q)
+            self._wait_for_safety(env)
             self.robot.q = q
             # Carried part follows the end-effector via the offset recorded at grasp time
             if self.attached_object is not None:
@@ -203,6 +206,13 @@ class TX2_60:
             for hook in self.step_hooks:
                 hook(0.02)
         return self.robot.q
+
+    def _wait_for_safety(self, env):
+        """Hold the arm still until the e-stop has been reset and restarted."""
+        while self.safety is not None and self.safety.stopped:
+            env.step(self.WAIT_STEP)
+            for hook in self.step_hooks:
+                hook(self.WAIT_STEP)
 
     def _wait_until_clear(self, env, q):
         """Hold the arm still while moving to q would put a link ellipsoid inside an obstacle."""
