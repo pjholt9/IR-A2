@@ -1,0 +1,296 @@
+{
+  "camera" : {
+    "captureEngine" : "arkitSpatial",
+    "deviceType" : "LiDARSpatial",
+    "effectiveAcquisition" : {
+      "depthFiltering" : "ARKitSceneDepth",
+      "depthHeight" : 192,
+      "depthSemantics" : "sceneDepth",
+      "depthWidth" : 256,
+      "engine" : "arkitSpatial",
+      "observedFrameDurationSeconds" : 0.016680500000802567,
+      "rgbHeight" : 1440,
+      "rgbWidth" : 1920,
+      "synchronization" : "sameARFrame",
+      "videoFrameDurationSeconds" : 0.016666666666666666,
+      "worldAlignment" : "gravity"
+    },
+    "effectiveDepthSource" : "lidarSpatial",
+    "geometryModel" : "arkitSceneDepth",
+    "requestedDepthSource" : "lidarSpatial",
+    "rotationDiagnostics" : {
+      "captureAngleRaw" : 90,
+      "depthConnection" : {
+        "available" : false
+      },
+      "depthSize" : "256x192",
+      "deviceModel" : "iPhone",
+      "effectiveDepthSource" : "lidarSpatial",
+      "finalPointCloudBaseRotationZ" : -1.5707962512969971,
+      "finalPreviewRotation" : 90,
+      "finalSaveRotation" : 90,
+      "isFrontCamera" : false,
+      "isVideoMirrored" : false,
+      "layoutMode" : "phonePortraitLocked",
+      "phoneFrontPathTaken" : false,
+      "physicalOrientation" : "portrait",
+      "previewAngleRaw" : 0,
+      "previewBufferCorrection" : 90,
+      "rawBufferAxis" : "landscape",
+      "requestedDepthSource" : "lidarSpatial",
+      "rgbSize" : "1920x1440",
+      "saveBufferCorrection" : 0,
+      "screenCoordinatePreviewRotation" : 0,
+      "systemVersion" : "26.6",
+      "videoConnection" : {
+        "available" : false
+      },
+      "videoRotationAngleForHorizonLevelCapture" : 90,
+      "videoRotationAngleForHorizonLevelPreview" : 0
+    },
+    "worldAlignment" : "gravity"
+  },
+  "createdAt" : "2026-10-19T16:36:26.898Z",
+  "depth" : {
+    "accuracy" : "absolute",
+    "depthSemantics" : "sceneDepth",
+    "height" : 256,
+    "isFiltered" : false,
+    "pixelFormat" : "fdep",
+    "provider" : "ARKit",
+    "scaleKind" : "absoluteMeters",
+    "sourceHeight" : 192,
+    "sourceWidth" : 256,
+    "unit" : "meter",
+    "width" : 192
+  },
+  "depthSource" : {
+    "displayName" : "LiDAR Spatial",
+    "effective" : "lidarSpatial",
+    "requested" : "lidarSpatial",
+    "scaleKind" : "absoluteMeters"
+  },
+  "effectiveAcquisition" : {
+    "depthFiltering" : "ARKitManaged",
+    "depthHeight" : 192,
+    "depthSemantics" : "sceneDepth",
+    "depthWidth" : 256,
+    "engine" : "ARKit",
+    "observedFrameDurationSeconds" : 0.016680500000802567,
+    "rgbHeight" : 1440,
+    "rgbWidth" : 1920,
+    "saveMinimumIntervalSeconds" : 0,
+    "synchronization" : "sameARFrame",
+    "videoFrameDurationSeconds" : 0.016666666666666666,
+    "worldAlignment" : "gravity"
+  },
+  "files" : [
+    {
+      "format" : "jpeg",
+      "height" : 256,
+      "path" : "rgb.jpg",
+      "role" : "rgb",
+      "sha256" : "35773e2976e86f8348cccb21bb88c2f8ab5b80b9e5d4128979b8cd34e2070a1b",
+      "width" : 192
+    },
+    {
+      "encoding" : {
+        "bytesPerRow" : 768,
+        "encoding" : "float32LEMetersRowMajor",
+        "endianness" : "little",
+        "format" : "bin",
+        "height" : 256,
+        "invalidRule" : "value <= 0 or non-finite",
+        "invalidValue" : 0,
+        "layout" : "rowMajor",
+        "orientation" : "savedImage",
+        "unit" : "meter",
+        "width" : 192
+      },
+      "format" : "bin",
+      "height" : 256,
+      "path" : "depth.bin",
+      "role" : "depth",
+      "sha256" : "e253017e0803437d45d8ce20a1feec5f4df795b82262141857234176e0361681",
+      "width" : 192
+    },
+    {
+      "encoding" : {
+        "bytesPerRow" : 192,
+        "encoding" : "uint8ConfidenceRowMajor",
+        "height" : 256,
+        "layout" : "rowMajor",
+        "orientation" : "savedImage",
+        "values" : {
+          "0" : "low",
+          "1" : "medium",
+          "2" : "high"
+        },
+        "width" : 192
+      },
+      "format" : "uint8",
+      "path" : "confidence.bin",
+      "role" : "confidence",
+      "sha256" : "24b0d641e03763eb265ecae116b54a37c07ed559e2a4b0df52495fb033470d14"
+    }
+  ],
+  "frameID" : "CBAE7BD1-76C3-4124-8FD5-77D355EE0349:532",
+  "integrityVersion" : 1,
+  "kind" : "capture",
+  "metrics" : {
+    "centerDepth" : 0.430908203125,
+    "centerPoint" : {
+      "x" : 0.50196078431372548,
+      "y" : 0.50261780104712039
+    },
+    "maxDepth" : 0.55615234375,
+    "maxPoint" : {
+      "x" : 0.070588235294117646,
+      "y" : 0.16230366492146597
+    },
+    "minDepth" : 0.1865234375,
+    "minPoint" : {
+      "x" : 0.12549019607843137,
+      "y" : 0.64397905759162299
+    },
+    "roi" : {
+      "height" : 0.20942408376963351,
+      "width" : 0.20392156862745098,
+      "x" : 0.40000000000000002,
+      "y" : 0.39790575916230364
+    },
+    "roiAverageDepth" : 0.37677735090255737,
+    "roiStdDev" : 0.065306924283504486,
+    "totalPixelCount" : 49152,
+    "validPixelCount" : 49152,
+    "validPixelRatio" : 1
+  },
+  "rgb" : {
+    "height" : 256,
+    "pixelFormat" : "420f",
+    "sourceHeight" : 1440,
+    "sourceWidth" : 1920,
+    "width" : 192
+  },
+  "rgbTimestampNanoseconds" : "32161586656625",
+  "rgbTimestampSeconds" : 32161.586656625001,
+  "schemaVersion" : 3,
+  "sessionId" : "Snapshot_20261020_033626_825",
+  "settings" : {
+    "captureDepthFormat" : "bin",
+    "captureDepthPreviewSaveFormat" : "noSave",
+    "captureRGBFormat" : "jpeg",
+    "depthDisplaySmoothing" : "none",
+    "depthFilteringMode" : "raw",
+    "depthFrameRateLimit" : "deviceDefault",
+    "depthPreviewSaveFormat" : "noSave",
+    "depthRangeMode" : "auto",
+    "depthSource" : "lidarSpatial",
+    "fixedDepthRangeMax" : 5,
+    "fixedDepthRangeMin" : 1,
+    "livePointCloudColorMode" : "rgb",
+    "objectDetection" : {
+      "confidenceThreshold" : 0.5,
+      "enabled" : false,
+      "iouThreshold" : 0.5,
+      "maskMargin" : "small",
+      "minimumAreaRatio" : 0,
+      "selectedClassIDs" : [
+        0
+      ]
+    },
+    "recordingContainerFormat" : "ros2NativeMCAP",
+    "recordingDepthFormat" : "bin",
+    "recordingInterval" : "maximum",
+    "recordingMotionDataEnabled" : true,
+    "recordingRGBFormat" : "jpeg",
+    "recordingRGBResolution" : "depthMatched",
+    "resolutionProfile" : "storageSaver",
+    "synchronizationMode" : "synchronizedPairs"
+  },
+  "sourceDepthTimestampNanoseconds" : "32161586656625",
+  "spatial" : {
+    "acquisitionTimestampNanoseconds" : "32161586656625",
+    "arWorldAxes" : "+Y up;ARKit session local",
+    "confidencePresent" : true,
+    "depthIntrinsics" : {
+      "cx" : 129.14882812499999,
+      "cy" : 95.828059895833334,
+      "fx" : 186.88066406249999,
+      "fy" : 186.88066406249999,
+      "height" : 192,
+      "width" : 256
+    },
+    "depthSemantics" : "sceneDepth",
+    "depthTransform" : {
+      "rotationDegrees" : 90,
+      "savedHeight" : 256,
+      "savedWidth" : 192,
+      "sourceHeight" : 192,
+      "sourceWidth" : 256
+    },
+    "frameID" : "CBAE7BD1-76C3-4124-8FD5-77D355EE0349:532",
+    "matrixLayout" : "rowMajor",
+    "pixelCoordinateConvention" : "integerCenters",
+    "poseValid" : true,
+    "rawCameraAxes" : "+X right,+Y up,-Z forward",
+    "rawCameraTransform" : [
+      0.003671079408377409,
+      0.99972021579742432,
+      -0.023366430774331093,
+      0.0012972764670848846,
+      -0.86557978391647339,
+      0.014877838082611561,
+      0.5005497932434082,
+      0.00045005325227975845,
+      0.50075739622116089,
+      0.018387950956821442,
+      0.86539226770401001,
+      0.0035777678713202477,
+      0,
+      0,
+      0,
+      1
+    ],
+    "rgbIntrinsics" : {
+      "cx" : 968.6162109375,
+      "cy" : 718.71044921875,
+      "fx" : 1401.60498046875,
+      "fy" : 1401.60498046875,
+      "height" : 1440,
+      "width" : 1920
+    },
+    "rgbTransform" : {
+      "rotationDegrees" : 90,
+      "savedHeight" : 256,
+      "savedWidth" : 192,
+      "sourceHeight" : 1440,
+      "sourceWidth" : 1920
+    },
+    "schemaVersion" : 1,
+    "timestampCoordinate" : "ARBootSeconds",
+    "trackingState" : "normal",
+    "worldAlignment" : "gravity",
+    "worldEpoch" : 2,
+    "worldID" : "CBAE7BD1-76C3-4124-8FD5-77D355EE0349",
+    "worldMappingStatus" : "limited"
+  },
+  "spatialDefinitions" : {
+    "arWorldAxes" : "+Y up;ARKit session local",
+    "confidenceFiltering" : "none",
+    "depthRegistration" : "ARFrame capturedImage;depthK=RGBK scaled by depth\/image dimensions",
+    "e57WorldAxes" : "(ARx,-ARz,ARy)",
+    "frameMetadataTopic" : "\/depthcapture\/spatial\/frame_metadata",
+    "pixelCoordinateConvention" : "integerCenters",
+    "provider" : "ARKit",
+    "rawCameraAxes" : "+X right,+Y up,-Z forward",
+    "rawCameraTransform" : "cameraToARWorld,rowMajor4x4",
+    "rosWorldAxes" : "(-ARz,-ARx,ARy)",
+    "schemaVersion" : 1,
+    "timestampCoordinate" : "ARBootSeconds",
+    "timestampNanosecondsEncoding" : "decimalString"
+  },
+  "status" : "completed",
+  "timestampNanoseconds" : "32161586656625",
+  "timestampSeconds" : 32161.586656625001
+}

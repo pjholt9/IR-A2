@@ -634,3 +634,235 @@ class RobotTasks:
         self._move_jtraj(self.scenery.ec66.q_standby.copy(), recorder, "Return standby")
         print("Standby reached; printer door remains open")
         return self.robot.q.copy()
+
+    # Camera pose is defined in the calibrated plate-reference frame.
+    CAMERA_XYZ_PLATE = np.array([-0.125, -0.150, 0.225])
+    CAMERA_RPY_DEG = np.array([-120.0, 0.0, 0.0])
+    CAMERA_WAYPOINT_OFFSET_WORLD = np.array([-0.15, 0.0, 0.15])
+
+    def _camera_target(self, printer):
+        r, p, y = np.deg2rad(self.CAMERA_RPY_DEG)
+        return (printer.plate_reference @ SE3(*self.CAMERA_XYZ_PLATE)
+                @ SE3.Rx(r) @ SE3.Ry(p) @ SE3.Rz(y))
+
+    def _camera_cartesian_rmrc(self, T_goal, recorder, label, steps=180, dt=0.03,
+                               damping=0.001, kp=2.0, kr=2.0):
+        """Closed-loop 6D Cartesian tracking with linear XYZ and SLERP orientation.
+
+        This is a kinematic simulation, not collision detection or a safety controller.
+        """
+        robot = self.robot
+        T_start = robot.fkine(robot.q)
+        positions = np.linspace(T_start.t, T_goal.t, steps)
+        slerp = Slerp([0.0, 1.0], Rotation.from_matrix(
+            np.stack((T_start.R, T_goal.R))))
+        qlim = np.asarray([link.qlim for link in robot.links], dtype=float)
+        for i in range(steps - 1):
+            actual = robot.fkine(robot.q)
+            fraction = (i + 1) / (steps - 1)
+            R_des = slerp([fraction]).as_matrix()[0]
+            v = ((positions[i + 1] - positions[i]) / dt
+                 + kp * (positions[i + 1] - actual.t))
+            w = kr * Rotation.from_matrix(R_des @ actual.R.T).as_rotvec()
+            J = robot.jacob0(robot.q)
+            qdot = J.T @ linalg.solve(
+                J @ J.T + damping * np.eye(6), np.r_[v, w])
+            q_next = robot.q + dt * qdot
+            if not np.all(np.isfinite(q_next)):
+                raise RuntimeError(f"{label}: non-finite RMRC solution")
+            if np.any(q_next < qlim[:, 0]) or np.any(q_next > qlim[:, 1]):
+                raise RuntimeError(f"{label}: joint limit reached at step {i}")
+            robot.q = q_next
+            self.env.step(dt)
+            recorder.record(dt, label)
+        T_end = robot.fkine(robot.q)
+        pos_mm = 1000 * np.linalg.norm(T_goal.t - T_end.t)
+        rot_deg = np.rad2deg(np.linalg.norm(
+            Rotation.from_matrix(T_goal.R @ T_end.R.T).as_rotvec()))
+        print(f"{label}: position error {pos_mm:.2f} mm, orientation error {rot_deg:.3f} deg")
+        if pos_mm > 5.0 or rot_deg > 2.0:
+            raise RuntimeError(f"{label}: tracking tolerance exceeded")
+        return T_end
+
+    def move_to_camera_pose(self, printer, recorder=None):
+        """Standby -> camera waypoint (jtraj) -> camera EE pose (6D RMRC).
+
+        Call after return_to_standby(printer). Door must remain open.
+        Returns the actual EE pose at the camera target.
+        """
+        recorder = self._task_recorder(printer, recorder)
+        if np.max(np.abs(self.robot.q - self.scenery.ec66.q_standby)) > np.deg2rad(2):
+            raise RuntimeError("Camera task must start from standby")
+
+        T_camera = self._camera_target(printer)
+        T_waypoint = SE3.Rt(
+            T_camera.R,
+            T_camera.t + self.CAMERA_WAYPOINT_OFFSET_WORLD)
+        sol_waypoint = self.robot.ikine_LM(
+            T_waypoint, q0=self.robot.q.copy(), joint_limits=True)
+        if not sol_waypoint.success:
+            raise RuntimeError("Camera waypoint IK failed")
+        sol_camera = self.robot.ikine_LM(
+            T_camera, q0=sol_waypoint.q.copy(), joint_limits=True)
+        if not sol_camera.success:
+            raise RuntimeError("Camera target IK failed")
+        print("Camera waypoint and target IK: SUCCESS")
+        self._move_jtraj(sol_waypoint.q, recorder, "Camera waypoint", steps=200, dt=0.02)
+        T_actual = self._camera_cartesian_rmrc(
+            T_camera, recorder, "Camera RMRC", steps=180, dt=0.03)
+        self._camera_pose = T_camera
+        self._pre_pick_pose = None
+        return T_actual
+
+    def camera_capture_dwell(self, printer, seconds=3.0, recorder=None):
+        """Hold camera EE pose while simulating image capture (no camera API)."""
+        recorder = self._task_recorder(printer, recorder)
+        if getattr(self, "_camera_pose", None) is None:
+            raise RuntimeError("Call move_to_camera_pose first")
+        if seconds < 0:
+            raise ValueError("Dwell must be nonnegative")
+        remaining = float(seconds)
+        while remaining > 1e-9:
+            dt = min(0.03, remaining)
+            self.env.step(dt)
+            remaining -= dt
+        print(f"Camera capture dwell complete: {seconds:.2f} s")
+        return self.robot.fkine(self.robot.q)
+
+    def move_to_pre_pick(self, printer, distance=0.10, recorder=None):
+        """Retract EE in WORLD +Y while preserving camera orientation.
+
+        Returns the actual world-frame pre-pick EE pose. It is NOT a part pose.
+        """
+        recorder = self._task_recorder(printer, recorder)
+        if getattr(self, "_camera_pose", None) is None:
+            raise RuntimeError("Call move_to_camera_pose first")
+        if distance <= 0:
+            raise ValueError("Pre-pick retreat distance must be positive")
+        T_start = self.robot.fkine(self.robot.q)
+        if np.linalg.norm(T_start.t - self._camera_pose.t) > 0.005:
+            raise RuntimeError("EE is not at camera pose; cannot start pre-pick retreat")
+        T_goal = SE3(0.0, float(distance), 0.0) @ T_start
+        sol = self.robot.ikine_LM(
+            T_goal, q0=self.robot.q.copy(), joint_limits=True)
+        if not sol.success:
+            raise RuntimeError("Pre-pick pose IK failed; no motion executed")
+        T_actual = self._camera_cartesian_rmrc(
+            T_goal, recorder, "Pre-pick retreat", steps=120, dt=0.03)
+        self._pre_pick_pose = T_actual
+        print("Pre-pick EE world XYZ (m):", np.round(T_actual.t, 5))
+        return T_actual
+
+
+    # ----- PLAN B: deterministic part pick / straight RMRC -----
+    PICK_APPROACH_M = 0.250
+    PICK_RETREAT_M = 0.600
+    PICK_RPY_DEG = (-90.0, 0.0, 0.0)  # relative to printer.plate_reference
+
+    def pick_target_pose(self, printer, part):
+        """Pick position from STL-local geometry, orientation from printer frame."""
+        from printed_part import pick_local_pose
+        T_part = SE3(np.asarray(part.mesh.T, dtype=float))
+        xyz = (T_part @ pick_local_pose(part.kind)).t
+        rx, ry, rz = np.deg2rad(self.PICK_RPY_DEG)
+        R = (printer.plate_reference.R @ SE3.Rx(rx).R
+             @ SE3.Ry(ry).R @ SE3.Rz(rz).R)
+        return SE3.Rt(R, xyz)
+
+    def _plan_linear_pick_rmrc(self, q_start, T_goal, steps=220, dt=0.03,
+                               damping=0.002, kp=2.0, kr=2.0):
+        """OFFLINE DLS RMRC with straight Cartesian XYZ and fixed orientation."""
+        q = np.asarray(q_start, dtype=float).copy()
+        T_start = self.robot.fkine(q)
+        R_fixed = T_start.R.copy()
+        rot_diff = Rotation.from_matrix(T_goal.R @ R_fixed.T).as_rotvec()
+        if np.linalg.norm(rot_diff) > np.deg2rad(2):
+            raise RuntimeError("RMRC segment orientation mismatch")
+        xyz = np.linspace(T_start.t, T_goal.t, steps)
+        qlim = np.asarray([link.qlim for link in self.robot.links], dtype=float)
+        path = [q.copy()]
+        for i in range(steps - 1):
+            T_now = self.robot.fkine(q)
+            v = ((xyz[i + 1] - xyz[i]) / dt
+                 + kp * (xyz[i + 1] - T_now.t))
+            w = kr * Rotation.from_matrix(R_fixed @ T_now.R.T).as_rotvec()
+            J = self.robot.jacob0(q)
+            qdot = J.T @ linalg.solve(J @ J.T + damping * np.eye(6),
+                                      np.r_[v, w])
+            q_next = q + dt * qdot
+            if not np.all(np.isfinite(q_next)):
+                raise RuntimeError(f"RMRC nonfinite joint solution at {i}")
+            if np.any(q_next < qlim[:, 0]) or np.any(q_next > qlim[:, 1]):
+                raise RuntimeError(f"RMRC joint limit at {i}")
+            if np.max(np.abs(q_next - q)) > np.deg2rad(7):
+                raise RuntimeError(f"RMRC joint jump > 7 degrees at {i}")
+            q = q_next
+            path.append(q.copy())
+        T_end = self.robot.fkine(q)
+        p_err = np.linalg.norm(T_goal.t - T_end.t)
+        r_err = np.linalg.norm(Rotation.from_matrix(
+            T_goal.R @ T_end.R.T).as_rotvec())
+        if p_err > 0.005 or r_err > np.deg2rad(2):
+            raise RuntimeError(f"RMRC error {p_err*1000:.2f}mm / "
+                               f"{np.rad2deg(r_err):.2f}deg")
+        return np.asarray(path)
+
+    def plan_part_pick(self, printer, part, approach_m=None, retreat_m=None):
+        """Preview ALL segments before moving; requires pre-pick pose."""
+        if getattr(self, "_pre_pick_pose", None) is None:
+            raise RuntimeError("Run move_to_pre_pick before planning")
+        a = self.PICK_APPROACH_M if approach_m is None else float(approach_m)
+        r = self.PICK_RETREAT_M if retreat_m is None else float(retreat_m)
+        if a <= 0 or r < a:
+            raise ValueError("Require 0 < approach <= retreat")
+        T_pick = self.pick_target_pose(printer, part)
+        T_out = SE3.Rt(T_pick.R, T_pick.t + np.array([0, a, 0]))
+        T_retreat = SE3.Rt(T_pick.R, T_pick.t + np.array([0, r, 0]))
+        sol = self.robot.ikine_LM(T_out, q0=self.robot.q.copy(), joint_limits=True)
+        if not sol.success:
+            raise RuntimeError("Outside alignment IK failed")
+        q_out = np.asarray(sol.q, dtype=float)
+        align = np.asarray(jtraj(self.robot.q.copy(), q_out, 180).q)
+        inward = self._plan_linear_pick_rmrc(q_out, T_pick, steps=220)
+        outward = self._plan_linear_pick_rmrc(inward[-1], T_retreat, steps=340)
+        qlim = np.asarray([link.qlim for link in self.robot.links], dtype=float)
+        for label, path in (("align", align), ("in", inward),
+                            ("out", outward)):
+            if np.any(path < qlim[:, 0]) or np.any(path > qlim[:, 1]):
+                raise RuntimeError(f"{label}: joint limit violation")
+        return {"align": align, "in": inward, "out": outward,
+                "target": T_pick}
+
+    def execute_part_pick(self, printer, part, plan=None, recorder=None):
+        """Approach, verify grasp (<1 mm), attach, retreat and HOLD.
+
+        No standby return: drop waypoint will be taught separately.
+        On failed grasp, stop at pick point; do not retreat as if carrying.
+        """
+        recorder = self._task_recorder(printer, recorder)
+        if plan is None:
+            plan = self.plan_part_pick(printer, part)
+        if np.max(np.abs(self.robot.q - plan["align"][0])) > 1e-5:
+            raise RuntimeError("Robot moved since planning; replan required")
+        if part.isAttached:
+            raise RuntimeError("Part is already attached")
+        for phase in ("align", "in", "out"):
+            if phase == "out" and not part.isAttached:
+                raise RuntimeError("ATTACH FAILED: retreat cancelled; part not attached")
+            for q in plan[phase][1:]:
+                self.robot.q = np.asarray(q, dtype=float).copy()
+                if part.isAttached:
+                    part.follow_ee()
+                self.env.step(0.03)
+                recorder.record(0.03, "Pick " + phase)
+            if phase == "in":
+                if not part.attach_to(self.robot, grasp_world_pose=plan["target"],
+                                      tolerance_m=0.001):
+                    print("ATTACH FAILED: EE-to-grasp error >= 1 mm. "
+                          "Robot stopped at grasp pose; no retreat executed.")
+                    return False
+        self._post_pick_hold_pose = self.robot.fkine(self.robot.q)
+        print("PICK COMPLETE: retreat finished; holding pose with part attached. "
+              "Door remains open. Await pre-drop teaching.")
+        print("Hold EE world XYZ (m):", np.round(self._post_pick_hold_pose.t, 5))
+        return True

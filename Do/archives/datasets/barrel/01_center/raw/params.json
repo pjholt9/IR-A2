@@ -1,0 +1,91 @@
+{
+  "intrinsics" : [
+    [
+      186.88066406249996,
+      0,
+      0
+    ],
+    [
+      0,
+      186.88066406249999,
+      0
+    ],
+    [
+      95.171940104166666,
+      129.14882812499999,
+      1
+    ]
+  ],
+  "spatial" : {
+    "schemaVersion" : 1,
+    "confidencePresent" : true,
+    "depthIntrinsics" : {
+      "cy" : 95.828059895833334,
+      "cx" : 129.14882812499999,
+      "height" : 192,
+      "fx" : 186.88066406249999,
+      "width" : 256,
+      "fy" : 186.88066406249999
+    },
+    "depthTransform" : {
+      "sourceHeight" : 192,
+      "savedWidth" : 192,
+      "sourceWidth" : 256,
+      "savedHeight" : 256,
+      "rotationDegrees" : 90
+    },
+    "poseValid" : true,
+    "frameID" : "CBAE7BD1-76C3-4124-8FD5-77D355EE0349:532",
+    "rgbIntrinsics" : {
+      "cy" : 718.71044921875,
+      "cx" : 968.6162109375,
+      "height" : 1440,
+      "fx" : 1401.60498046875,
+      "width" : 1920,
+      "fy" : 1401.60498046875
+    },
+    "pixelCoordinateConvention" : "integerCenters",
+    "worldAlignment" : "gravity",
+    "timestampCoordinate" : "ARBootSeconds",
+    "rawCameraTransform" : [
+      0.003671079408377409,
+      0.99972021579742432,
+      -0.023366430774331093,
+      0.0012972764670848846,
+      -0.86557978391647339,
+      0.014877838082611561,
+      0.5005497932434082,
+      0.00045005325227975845,
+      0.50075739622116089,
+      0.018387950956821442,
+      0.86539226770401001,
+      0.0035777678713202477,
+      0,
+      0,
+      0,
+      1
+    ],
+    "rawCameraAxes" : "+X right,+Y up,-Z forward",
+    "worldMappingStatus" : "limited",
+    "rgbTransform" : {
+      "sourceHeight" : 1440,
+      "savedWidth" : 192,
+      "sourceWidth" : 1920,
+      "savedHeight" : 256,
+      "rotationDegrees" : 90
+    },
+    "acquisitionTimestampNanoseconds" : "32161586656625",
+    "depthSemantics" : "sceneDepth",
+    "matrixLayout" : "rowMajor",
+    "worldID" : "CBAE7BD1-76C3-4124-8FD5-77D355EE0349",
+    "trackingState" : "normal",
+    "worldEpoch" : 2,
+    "arWorldAxes" : "+Y up;ARKit session local"
+  },
+  "rotationAngle" : 0,
+  "intrinsicMatrixReferenceDimensions" : {
+    "width" : 192,
+    "height" : 256
+  },
+  "intrinsicsCoordinateSpace" : "savedImage"
+}

@@ -1,0 +1,57 @@
+{
+  "status": "PROVISIONAL_SEGMENTATION_NOT_ROBOT_READY",
+  "sample": "C:\\Users\\Asus ROG\\Documents\\UTS\\Industrial Robotics\\Code\\IR-A2\\Do\\datasets\\barrel\\01_center\\raw",
+  "image_shape_hw": [
+    256,
+    192
+  ],
+  "candidate_plate_normal_toward_barrel_camera": [
+    0.005407874639417526,
+    -0.8628641925050028,
+    -0.5054069055568733
+  ],
+  "candidate_plate_point_camera_m": [
+    -0.017957522338442646,
+    0.1174533167272851,
+    0.2836878508980051
+  ],
+  "grabcut_rectangle_xywh": [
+    64,
+    14,
+    54,
+    186
+  ],
+  "rgb_mask_pixels": 1346,
+  "barrel_depth_mask_pixels": 1235,
+  "barrel_height_percentiles_m": [
+    0.016173798076689037,
+    0.04948330384975802,
+    0.07963967504778495
+  ],
+  "barrel_visible_surface_median_camera_m": [
+    -0.020546117023489834,
+    0.0589266871965563,
+    0.28515625
+  ],
+  "lower_barrel_visible_surface_proxy_camera_m": [
+    -0.020958076362020628,
+    0.053299274992906265,
+    0.283447265625
+  ],
+  "lower_surface_proxy_projected_to_plane_camera_m": [
+    -0.02125800570024038,
+    0.101155097009413,
+    0.3114779373440642
+  ],
+  "grasp_height_160mm_surface_proxy_camera_m": [
+    -0.020392745757933574,
+    -0.03690317379138744,
+    0.23061283245496447
+  ],
+  "warnings": [
+    "GrabCut rectangle is tuned for center sample; not validated on other locations.",
+    "The 160 mm proxy uses a visible surface point, NOT the barrel center axis.",
+    "No camera-to-Swift registration, true 3D cylinder fit, or safe grasp pose.",
+    "Do not feed these coordinates directly to RobotTasks."
+  ]
+}

@@ -2,8 +2,8 @@ from spatialgeometry import Mesh
 from spatialmath import SE3
 from math import pi
 from pathlib import Path
-from .door import Door
-from .build_plate import BuildPlate
+from door import Door
+from build_plate import BuildPlate
 
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"

@@ -1,0 +1,30 @@
+{
+  "source": "C:\\Users\\Asus ROG\\Documents\\UTS\\Industrial Robotics\\Code\\IR-A2\\Do\\datasets\\barrel\\01_center\\raw",
+  "image_shape_hw": [
+    256,
+    192
+  ],
+  "camera_intrinsics_saved_image": {
+    "fx": 186.88066406249996,
+    "fy": 186.8806640625,
+    "cx": 95.17194010416667,
+    "cy": 129.148828125
+  },
+  "depth_unit": "meters",
+  "confidence_min": 1,
+  "valid_pixels": 42133,
+  "total_pixels": 49152,
+  "candidate_plane_normal_camera": [
+    -0.005407874639417526,
+    0.8628641925050028,
+    0.5054069055568733
+  ],
+  "candidate_plane_point_camera_m": [
+    -0.017957522338442646,
+    0.1174533167272851,
+    0.2836878508980051
+  ],
+  "candidate_plane_inliers": 13887,
+  "candidate_plane_points_tested": 17943,
+  "note": "RANSAC finds a plane candidate, not verified as the build plate. Camera frame is optical: x right, y down, z forward. No robot/world registration or grasp pose estimated."
+}
