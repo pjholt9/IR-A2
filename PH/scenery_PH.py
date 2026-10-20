@@ -37,7 +37,8 @@ FENCE_BACK_X = (-0.49, 1.03)
 FENCE_BACK_Y = -2.15
 FENCE_OPENING_Y = 0.85
 GENERAL_WORLD_XY = (-0.6, 0.85)
-TABLE_POSE = SE3(
+PH_WORKCELL_OFFSET = SE3(0.7, 0.0, 0.0)
+TABLE_POSE = PH_WORKCELL_OFFSET @ SE3(
     GENERAL_WORLD_XY[0] - GENERAL_LOCAL.t[0],
     GENERAL_WORLD_XY[1] - GENERAL_LOCAL.t[1],
     0,
@@ -76,6 +77,11 @@ class SceneryPH:
                 @ SE3(FENCE_SIDE_X[0] - 0.527, FENCE_OPENING_Y, 0),
             )
         )
+        # Static visual meshes
+        self.table._collision = False
+
+        for fence in self.fences:
+            fence._collision = False
         self.tx2_60 = tx2_60 if tx2_60 is not None else TX2_60(
             base=self.table_pose @ ROBOT_LOCAL
         )
@@ -121,6 +127,7 @@ class SceneryPH:
             "emergencyStopButton",
             pose=self.table_pose @ SE3(*ESTOP_LOCAL_XY, TABLE_TOP),
         )
+        self.estop._collision = False
         env.add(self.estop)
         return self.tx2_60
 
@@ -176,5 +183,6 @@ class SceneryPH:
             ),
         ]
         for piece in pieces:
+            piece._collision = False
             env.add(piece)
         return pieces

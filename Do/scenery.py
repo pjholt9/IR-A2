@@ -22,7 +22,7 @@ class Scenery:
 
         # Future GUI can select the part independently for each printer.
         # None means the printer currently has no printed part in the scene.
-        self.printer_part_types = {self.printer1: "barrel", self.printer2: None}
+        self.printer_part_types = {self.printer1: "body", self.printer2: None}
         self.parts = {}
         self.pick_markers = {}
         for printer, kind in self.printer_part_types.items():

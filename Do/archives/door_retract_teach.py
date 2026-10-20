@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation
 from roboticstoolbox import jtraj
 
 from scenery import Scenery
-from robot_tasks import RobotTasks
+from Do.robot_tasks_backup import RobotTasks
 from kinematic_analysis import analyse_full_kinematics
 
 PRINTER_NUMBER = 1  # 1 or 2

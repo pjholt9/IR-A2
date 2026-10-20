@@ -19,7 +19,7 @@ from roboticstoolbox import jtraj
 from kinematic_analysis import KinematicRecorder
 
 from scenery import Scenery
-from robot_tasks import RobotTasks
+from Do.robot_tasks_backup import RobotTasks
 
 PRINTER_NUMBER = 1  # 1 or 2
 INITIAL_OFFSET_M = [-0.125, -0.150, 0.225]  # relative to plate_reference

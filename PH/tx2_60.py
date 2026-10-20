@@ -156,6 +156,7 @@ class TX2_60:
                     pose=self.MESH_OFFSETS[link_index + 1],
                     color=self.MESH_COLOR,
                 )
+                mesh._collision = False
                 link = self.robot.links[link_index]
                 link.geometry = [*link.geometry, mesh]
                 self.link_meshes.append(mesh)
@@ -165,6 +166,7 @@ class TX2_60:
                 pose=self.base * self.MESH_OFFSETS[0],
                 color=self.MESH_COLOR,
             )
+            self.base_mesh._collision = False
             env.add(self.robot)
             env.add(self.base_mesh)
             self.using_meshes = True

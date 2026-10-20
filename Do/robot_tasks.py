@@ -866,3 +866,124 @@ class RobotTasks:
               "Door remains open. Await pre-drop teaching.")
         print("Hold EE world XYZ (m):", np.round(self._post_pick_hold_pose.t, 5))
         return True
+
+    # ---------------------------------------------------------------
+    # Geometry-based pre-drop and vertical RMRC (validated in teach GUI)
+    # ---------------------------------------------------------------
+    DROP_CLEARANCE_M = {"barrel": 0.050, "body": 0.080}
+
+    def plan_part_drop(self, part, bucket_pose, floor_z, bucket_width=0.24,
+                       wall_thickness=0.02, clearance_m=None,
+                       pre_drop_pose=None):
+        """Preview pre-drop jtraj and vertical DLS RMRC; NO collision checking.
+
+        Must start at the validated post-pick hold pose, with part attached.
+        Floor Z is the INSIDE floor TOP, not PH resting-centre Z.
+        """
+        from printed_part import PART_CONFIG
+        if not part.isAttached:
+            raise RuntimeError("DROP PLAN FAILED: part is not attached")
+        if part.kind not in self.DROP_CLEARANCE_M:
+            raise ValueError(f"Unknown part kind: {part.kind}")
+        if pre_drop_pose is None:
+            raise ValueError("Pass the taught world-frame pre_drop_pose")
+        clearance = (self.DROP_CLEARANCE_M[part.kind] if clearance_m is None
+                     else float(clearance_m))
+        if not np.isfinite(clearance) or not 0 <= clearance <= 0.12:
+            raise ValueError("Release clearance must be between 0 and 120 mm")
+        T_pre = SE3(pre_drop_pose.A)
+        q_start = np.asarray(self.robot.q, dtype=float).copy()
+        sol = self.robot.ikine_LM(T_pre, q0=q_start, joint_limits=True)
+        if not sol.success:
+            raise RuntimeError("Pre-drop IK failed")
+        q_pre = np.asarray(sol.q, dtype=float)
+        q_align = np.asarray(jtraj(q_start, q_pre, 240).q)
+        singular_values = np.array([
+            np.linalg.svd(self.robot.jacob0(q), compute_uv=False)
+            for q in q_align
+        ])
+
+        sigma_min = singular_values[:, -1]
+
+        print(
+            "Pre-drop minimum Jacobian singular value:",
+            np.min(sigma_min)
+        )
+
+        print(
+            "Pre-drop worst sample:",
+            np.argmin(sigma_min),
+            "/",
+            len(q_align) - 1
+        )
+        # Predict carried mesh pose at pre-drop WITHOUT changing the simulation.
+        T_ee_now = self.robot.fkine(q_start)
+        T_mesh_now = SE3(np.asarray(part.mesh.T, dtype=float))
+        T_ee_mesh = T_ee_now.inv() @ T_mesh_now
+        T_mesh_pre = T_pre @ T_ee_mesh
+        cfg = PART_CONFIG[part.kind]
+        w, d = float(cfg['width']), float(cfg['depth'])
+        corners = np.array([[0., 0., 0., 1.], [w, 0., 0., 1.],
+                            [0., d, 0., 1.], [w, d, 0., 1.]]).T
+        world_corners = (T_mesh_pre.A @ corners)[:3, :]
+        bucket_xy = np.asarray(bucket_pose.t[:2], dtype=float)
+        half_opening = bucket_width / 2.0 - wall_thickness
+        if np.any(np.abs(world_corners[:2, :] - bucket_xy[:, None]) > half_opening):
+            raise RuntimeError("Part footprint outside bucket inner opening")
+        bottom_z = float(np.min(world_corners[2, :]))
+        travel = bottom_z - float(floor_z) - clearance
+        if not np.isfinite(travel) or not 0 < travel <= 0.40:
+            raise RuntimeError(f"Invalid drop travel: {travel*1000:.1f} mm")
+        T_down = SE3.Rt(T_pre.R.copy(), T_pre.t + np.array([0., 0., -travel]))
+        q_down = self._plan_linear_pick_rmrc(
+            q_pre, T_down, steps=max(120, int(np.ceil(travel / 0.0015))))
+        # Reuse the exact joint samples in reverse for the upward retreat.
+        q_up = q_down[::-1].copy()
+        print(f"DROP PLAN | {part.kind} | clearance {clearance*1000:.1f} mm "
+              f"| travel {travel*1000:.1f} mm | floor Z {floor_z:.4f} m")
+        return dict(align=q_align, down=q_down, up=q_up,
+                    q_start=q_start, T_pre=T_pre, T_down=T_down,
+                    distance=travel, floor_z=float(floor_z),
+                    clearance=clearance, bucket_pose=SE3(bucket_pose.A))
+
+    def execute_part_drop(self, part, plan, recorder=None):
+        """Pre-drop jtraj, RMRC down, detach/settle, reverse RMRC up; HOLD.
+
+        Returns True on completion. No standby, door closing or rail homing.
+        """
+        if not part.isAttached:
+            raise RuntimeError("DROP ABORTED: part not attached")
+        if np.max(np.abs(np.asarray(self.robot.q) - plan['q_start'])) > 1e-5:
+            raise RuntimeError("Robot moved since drop planning; replan")
+        recorder = recorder if recorder is not None else getattr(self, '_active_recorder', None)
+        def step(q, label):
+            self.robot.q = np.asarray(q, dtype=float).copy()
+            if part.isAttached:
+                part.follow_ee()
+            self.env.step(0.03)
+            if recorder is not None:
+                recorder.record(0.03, label)
+        for q in plan['align'][1:]:
+            step(q, 'Pre-drop alignment')
+        for q in plan['down'][1:]:
+            step(q, 'Drop RMRC down')
+        # Use the ACTUAL part mesh transform after motion, not predicted geometry.
+        from printed_part import PART_CONFIG
+        cfg = PART_CONFIG[part.kind]
+        w, d = float(cfg['width']), float(cfg['depth'])
+        corners = np.array([[0., 0., 0., 1.], [w, 0., 0., 1.],
+                            [0., d, 0., 1.], [w, d, 0., 1.]]).T
+        T_mesh = np.asarray(part.mesh.T, dtype=float).copy()
+        bottom_z = float(np.min((T_mesh @ corners)[2, :]))
+        settle = bottom_z - plan['floor_z']
+        if settle < -0.005:
+            raise RuntimeError("DROP ABORTED: part bottom penetrated bucket floor")
+        part.detach()
+        T_mesh[:3, 3] -= np.array([0., 0., settle])
+        part.mesh.T = T_mesh
+        print(f"DETACH SUCCESS | {part.kind} | settle {settle*1000:.1f} mm "
+              f"| isAttached={part.isAttached}")
+        for q in plan['up'][1:]:
+            step(q, 'Drop RMRC up')
+        print("DROP COMPLETE: EE at pre-drop, part in bucket; no standby yet")
+        return True

@@ -35,9 +35,11 @@ def _centred_stl(filename):
 def make_part(colour, pose):
     """Create the sled body (brown) or barrel (black) mesh centred on pose."""
     s = MM_TO_M * PART_SCALE
-    return Mesh(
+    mesh = Mesh(
         filename=str(_centred_stl(PART_FILES[colour])),
         scale=[s, s, s],
         pose=pose,
         color=PART_COLOURS[colour],
     )
+    mesh._collision = False
+    return mesh

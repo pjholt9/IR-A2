@@ -14,7 +14,7 @@ from scipy import linalg
 from scipy.spatial.transform import Rotation
 from roboticstoolbox import jtraj
 from scenery import Scenery
-from robot_tasks import RobotTasks
+from Do.robot_tasks_backup import RobotTasks
 
 DT = 0.03
 STEPS = 220
@@ -136,7 +136,8 @@ def main():
     slider(rot_frame, 'Rz', -180, 180, 0, 'deg', update_rotation)
     distance_frame = ttk.LabelFrame(root, text='Straight approach / retreat')
     distance_frame.pack(fill='x', padx=14, pady=5)
-    slider(distance_frame, 'Retreat', 200, 500, 500, 'mm', invalidate)
+    slider(distance_frame, 'Approach offset', 150, 350, 250, 'mm', invalidate)
+    slider(distance_frame, 'Retreat distance', 300, 650, 600, 'mm', invalidate)
 
     def pick_pose():
         p = np.asarray(marker.T, dtype=float)[:3, 3]
@@ -169,9 +170,13 @@ def main():
             return
         try:
             T_pick = pick_pose()
-            retreat = vars_['Retreat'].get() / 1000.0
-            # WORLD +Y is outward from the printer in the calibrated scene.
-            T_out = SE3.Rt(T_pick.R, T_pick.t + np.array([0.0, retreat, 0.0]))
+            approach_offset = vars_['Approach offset'].get() / 1000.0
+            retreat_distance = vars_['Retreat distance'].get() / 1000.0
+            if retreat_distance < approach_offset:
+                raise ValueError('Retreat distance must be >= approach offset')
+            # Both waypoints lie on the same WORLD Y line through the pick target.
+            T_out = SE3.Rt(T_pick.R, T_pick.t + np.array([0.0, approach_offset, 0.0]))
+            T_retreat = SE3.Rt(T_pick.R, T_pick.t + np.array([0.0, retreat_distance, 0.0]))
             sol = robot.ikine_LM(T_out, q0=robot.q.copy(), joint_limits=True)
             if not sol.success:
                 raise RuntimeError('Outside alignment pose IK failed')
@@ -185,17 +190,19 @@ def main():
             if np.linalg.norm(T_aligned.t - T_out.t) > POS_TOL:
                 raise RuntimeError('Outside alignment IK XYZ error too high')
             inward, pos_in, rot_in = offline_rmrc(robot, q_out, T_pick)
-            # Return uses the same world +Y Cartesian line in reverse.
-            outward, pos_out, rot_out = offline_rmrc(robot, inward[-1], T_out)
+            # Retreat follows the same Cartesian line in reverse, extending past alignment.
+            outward, pos_out, rot_out = offline_rmrc(robot, inward[-1], T_retreat, steps=340)
             q_standby = np.asarray(scenery.ec66.q_standby, dtype=float)
             standby_path = np.asarray(jtraj(outward[-1], q_standby, 200).q)
             if np.any(standby_path < qlim[:, 0]) or np.any(standby_path > qlim[:, 1]):
                 raise RuntimeError('Standby return violates joint limits')
             state['plan'] = (align_path, inward, outward, standby_path)
-            status.set(f'PREVIEW OK | in {pos_in*1000:.1f} mm | out {pos_out*1000:.1f} mm | {retreat*100:.0f} cm')
+            status.set(f'PREVIEW OK | approach {approach_offset*1000:.0f} mm | retreat {retreat_distance*1000:.0f} mm | errors {pos_in*1000:.1f}/{pos_out*1000:.1f} mm')
             print('Pick WORLD XYZ (m):', np.round(T_pick.t, 5))
             print('Outside WORLD XYZ (m):', np.round(T_out.t, 5))
-            print('Approach distance (m):', retreat)
+            print('Approach offset (m):', approach_offset)
+            print('Retreat distance (m):', retreat_distance)
+            print('Retreat WORLD XYZ (m):', np.round(T_retreat.t, 5))
             print('RMRC tracking errors (mm):', round(pos_in*1000, 2), round(pos_out*1000, 2))
             print('WARNING: IK and joint-limit checks do NOT establish collision clearance.')
         except Exception as exc:
@@ -208,7 +215,7 @@ def main():
             return
         if not messagebox.askyesno('SIMULATION ONLY — no collision checking',
                 'Execute: joint-space align OUTSIDE → RMRC straight IN → hold at pick → '
-                'RMRC straight OUT → joint-space standby?\n\n'
+                'RMRC straight OUT beyond alignment → joint-space standby?\n\n'
                 'Mesh collision is NOT checked. The part is NOT attached to the gripper.'):
             return
         plan = state['plan']
