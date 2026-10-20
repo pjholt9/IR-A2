@@ -64,6 +64,10 @@ def main():
                                 pre_drop_pose=T_pre)
     print('PREVIEW COMPLETE. Executing simulated drop (no collision checking).')
     tasks.execute_part_drop(part, plan, recorder=recorder)
+    tasks.return_to_standby(printer)
+    tasks.return_to_open_handle(printer)
+    tasks.close_door(printer)
+    tasks.finish_cycle_and_home(printer, recorder=recorder)
     analyse_full_kinematics(scene.robot, recorder)
     print('Holding at pre-drop. Door still open; close/standby/home not implemented.')
     while True:

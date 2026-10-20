@@ -36,6 +36,10 @@ class RobotTasks:
         self._active_printer = printer
         self._approach_rotation = (door.get_handle_pose() @ SE3.Rx(-pi / 2)).R.copy()
         self._retract_pose = None
+        self._door_return_paths = {}
+        self._door_opening_q = None
+        self._door_approach_q = None
+        self._door_pregrasp_q = None
 
         T_handle = door.get_handle_pose()
 
@@ -495,6 +499,29 @@ class RobotTasks:
 
 
 
+        # Preserve BOTH original approach segments, including their starting joint samples.
+        # Pre-grasp: standby -> pre-grasp (jtraj).
+        # Approach: pre-grasp -> closed-door handle (DLS RMRC).
+        pre_ids = [i for i, name in enumerate(recorder.phase) if name == "Pre-grasp"]
+        approach_ids = [i for i, name in enumerate(recorder.phase) if name == "Approach"]
+        if not pre_ids or not approach_ids or pre_ids[0] < 1 or approach_ids[0] < 1:
+            raise RuntimeError("Cannot save door approach: missing pre-grasp/approach samples")
+        if approach_ids[0] != pre_ids[-1] + 1:
+            raise RuntimeError("Door approach phase samples are not contiguous")
+        self._door_pregrasp_q = np.asarray(
+            [recorder.q[pre_ids[0] - 1]] + [recorder.q[i] for i in pre_ids], dtype=float).copy()
+        self._door_approach_q = np.asarray(
+            [recorder.q[approach_ids[0] - 1]] + [recorder.q[i] for i in approach_ids], dtype=float).copy()
+        print(f"SAVED DOOR APPROACH | pre-grasp {len(self._door_pregrasp_q)} samples | "
+              f"RMRC {len(self._door_approach_q)} samples")
+
+        # Snapshot verified opening path BEFORE other task phases append to recorder.
+        opening_ids = [i for i, name in enumerate(recorder.phase) if name == "Door opening"]
+        if len(opening_ids) == 90 and opening_ids[0] > 0:
+            self._door_opening_q = np.asarray(
+                [recorder.q[opening_ids[0] - 1]] + [recorder.q[i] for i in opening_ids], dtype=float).copy()
+        else:
+            raise RuntimeError(f"Cannot save door opening trajectory: {len(opening_ids)} samples")
         print("Door fully opened!")
 
         env.step(1)
@@ -532,6 +559,8 @@ class RobotTasks:
         Requires open_door(printer) to have finished. Returns target SE3.
         """
         recorder = self._task_recorder(printer, recorder)
+        _saved_start_q = self.robot.q.copy()
+        _saved_rec_index = len(recorder.q)
         robot, door = self.robot, printer.door
         T_handle_open = door.get_handle_pose() @ SE3.Rx(-pi / 2)
         T_goal = T_handle_open @ SE3(0, 0, -float(distance))
@@ -565,6 +594,10 @@ class RobotTasks:
         if pos > 0.005 or rot > np.deg2rad(2):
             raise RuntimeError("Retract tracking tolerance exceeded")
         self._retract_pose = T_goal
+        self._door_return_paths["retract"] = np.asarray(
+            [_saved_start_q] + [np.asarray(q, dtype=float).copy() for q in recorder.q[_saved_rec_index:]],
+            dtype=float)
+        self._door_return_paths["retract"][-1] = self.robot.q.copy()
         return T_goal
 
     def move_to_clearance(self, printer, offset=None, recorder=None):
@@ -573,6 +606,8 @@ class RobotTasks:
         offset: [dx,dy,dz] in printer frame, metres. Defaults to taught pose.
         """
         recorder = self._task_recorder(printer, recorder)
+        _saved_start_q = self.robot.q.copy()
+        _saved_rec_index = len(recorder.q)
         if self._retract_pose is None:
             raise RuntimeError("Call retract_from_door before move_to_clearance")
         offset = (self.CLEARANCE_OFFSET_PRINTER if offset is None
@@ -589,11 +624,17 @@ class RobotTasks:
         err = np.linalg.norm(self.robot.fkine(self.robot.q).t - T_goal.t) * 1000
         print(f"Clearance offset (printer frame): {offset} m")
         print(f"Clearance EE position error: {err:.2f} mm")
+        self._door_return_paths["clearance"] = np.asarray(
+            [_saved_start_q] + [np.asarray(q, dtype=float).copy() for q in recorder.q[_saved_rec_index:]],
+            dtype=float)
+        self._door_return_paths["clearance"][-1] = self.robot.q.copy()
         return T_goal
 
     def reorient_for_standby(self, printer, recorder=None, steps=60):
         """Keep EE XYZ fixed while SLERP-ing back to the closed-door approach rotation."""
         recorder = self._task_recorder(printer, recorder)
+        _saved_start_q = self.robot.q.copy()
+        _saved_rec_index = len(recorder.q)
         robot = self.robot
         R_target = self._approach_rotation
         T_start = robot.fkine(robot.q)
@@ -626,6 +667,10 @@ class RobotTasks:
         angle_error = np.rad2deg(np.linalg.norm(
             Rotation.from_matrix(R_target @ T_end.R.T).as_rotvec()))
         print(f"Reorient: XYZ drift {pos_error:.2f} mm, orientation error {angle_error:.3f} deg")
+        self._door_return_paths["reorient"] = np.asarray(
+            [_saved_start_q] + [np.asarray(q, dtype=float).copy() for q in recorder.q[_saved_rec_index:]],
+            dtype=float)
+        self._door_return_paths["reorient"][-1] = self.robot.q.copy()
         return T_end
 
     def return_to_standby(self, printer, recorder=None):
@@ -634,6 +679,124 @@ class RobotTasks:
         self._move_jtraj(self.scenery.ec66.q_standby.copy(), recorder, "Return standby")
         print("Standby reached; printer door remains open")
         return self.robot.q.copy()
+
+    def _reverse_saved_door_segment(self, printer, label, recorder=None, dt=0.03):
+        """Replay a captured joint-space segment backwards (no fresh IK)."""
+        recorder = self._task_recorder(printer, recorder)
+        if label not in self._door_return_paths:
+            raise RuntimeError(f"No saved {label} trajectory; run opening tasks first")
+        path = self._door_return_paths[label]
+        mismatch = float(np.rad2deg(np.max(np.abs(self.robot.q - path[-1]))))
+        print(f"Reverse {label} | start mismatch {mismatch:.6f} deg")
+        if mismatch > 2.0:
+            raise RuntimeError(f"Reverse {label} aborted: start mismatch {mismatch:.3f} deg")
+        for q in path[-2::-1]:
+            self.robot.q = q.copy()
+            self.env.step(dt)
+            recorder.record(dt, f"Reverse {label}")
+        return self.robot.fkine(self.robot.q)
+
+    def return_to_open_handle(self, printer, recorder=None, steps=220):
+        """Standby -> saved reorientation endpoint -> reverse 3 verified paths."""
+        recorder = self._task_recorder(printer, recorder)
+        if any(k not in self._door_return_paths for k in ('reorient', 'clearance', 'retract')):
+            raise RuntimeError('Missing saved return segments')
+        q_target = self._door_return_paths['reorient'][-1]
+        q_start = np.asarray(self.robot.q, dtype=float).copy()
+        path = np.asarray(jtraj(q_start, q_target, steps).q, dtype=float)
+        qlim = np.asarray(self.robot.qlim, dtype=float)
+        if qlim.shape != (2, len(q_start)):
+            raise RuntimeError(f'Unexpected joint limits shape {qlim.shape}')
+        low, high = qlim
+        if np.any((np.isfinite(low) & (path < low - 1e-6)) |
+                  (np.isfinite(high) & (path > high + 1e-6))):
+            raise RuntimeError('Standby -> saved clearance joint limit violation')
+        for q in path[1:]:
+            self.robot.q = q.copy()
+            self.env.step(0.02)
+            recorder.record(0.02, 'Standby to saved clearance')
+        for name in ('reorient', 'clearance', 'retract'):
+            self._reverse_saved_door_segment(printer, name, recorder)
+        actual = self.robot.fkine(self.robot.q)
+        target = printer.door.get_handle_pose() @ SE3.Rx(-pi/2)
+        p_err = float(np.linalg.norm(actual.t - target.t) * 1000)
+        r_err = float(np.rad2deg(np.linalg.norm(
+            Rotation.from_matrix(target.R @ actual.R.T).as_rotvec())))
+        print(f'OPEN HANDLE REACHED | XYZ error {p_err:.3f} mm | R error {r_err:.4f} deg')
+        if p_err > 5.0 or r_err > 2.0:
+            raise RuntimeError('Return-to-handle alignment failed; closing prohibited')
+        return actual
+
+    def close_door(self, printer, recorder=None):
+        """Replay verified opening trajectory backwards, synchronized with door angle."""
+        recorder = self._task_recorder(printer, recorder)
+        opening_q = self._door_opening_q
+        if opening_q is None or opening_q.shape != (91, len(self.robot.q)):
+            raise RuntimeError('Missing saved 91-point door opening path')
+        mismatch = float(np.rad2deg(np.max(np.abs(self.robot.q - opening_q[-1]))))
+        print(f'CLOSE START | joint mismatch {mismatch:.6f} deg')
+        if mismatch > 2.0:
+            raise RuntimeError('Door closing aborted: robot not at recorded open handle')
+        angles = np.linspace(0.0, -pi/2, 91)
+        worst_mm = 0.0
+        worst_deg = 0.0
+        for i in range(89, -1, -1):
+            printer.door.update_angle(float(angles[i]))
+            self.robot.q = opening_q[i].copy()
+            self.env.step(0.05)
+            recorder.record(0.05, 'Door closing (reverse playback)')
+            target = printer.door.get_handle_pose() @ SE3.Rx(-pi/2)
+            actual = self.robot.fkine(self.robot.q)
+            err_mm = float(np.linalg.norm(actual.t - target.t) * 1000)
+            err_deg = float(np.rad2deg(np.linalg.norm(
+                Rotation.from_matrix(target.R @ actual.R.T).as_rotvec())))
+            worst_mm = max(worst_mm, err_mm)
+            worst_deg = max(worst_deg, err_deg)
+            if i % 15 == 0:
+                print(f'CLOSING | angle={np.rad2deg(angles[i]):.1f} deg | '
+                      f'handle error={err_mm:.3f} mm, {err_deg:.4f} deg')
+            if err_mm > 5.0 or err_deg > 2.0:
+                raise RuntimeError('Door closing tracking error exceeded tolerance')
+        print(f'DOOR CLOSED | worst handle error {worst_mm:.3f} mm / {worst_deg:.4f} deg')
+        return True
+
+    def release_closed_handle_and_standby(self, printer, recorder=None, dt=0.03,
+                                          tolerance_deg=2.0):
+        """Replay closed-handle approach and pre-grasp backwards, ending at standby.
+
+        Requires close_door() to have completed. No new IK or Jacobian inversion.
+        Keeps the printer door closed and does not move the linear platform.
+        """
+        recorder = self._task_recorder(printer, recorder)
+        if self._door_approach_q is None or self._door_pregrasp_q is None:
+            raise RuntimeError("No saved door approach; run open_door first")
+
+        for label, path in (("Reverse approach (closed handle to pre-grasp)",
+                             self._door_approach_q),
+                            ("Reverse pre-grasp (to standby)",
+                             self._door_pregrasp_q)):
+            mismatch = float(np.rad2deg(np.max(np.abs(self.robot.q - path[-1]))))
+            print(f"{label} | start joint mismatch {mismatch:.6f} deg")
+            if mismatch > tolerance_deg:
+                raise RuntimeError(f"{label}: start mismatch {mismatch:.3f} deg")
+            for q in path[-2::-1]:
+                self.robot.q = np.asarray(q, dtype=float).copy()
+                self.env.step(dt)
+                recorder.record(dt, label)
+
+        standby = np.asarray(self.scenery.ec66.q_standby, dtype=float)
+        err = float(np.rad2deg(np.max(np.abs(self.robot.q - standby))))
+        print(f"CLOSED DOOR RELEASE COMPLETE | standby error {err:.6f} deg")
+        if err > 0.1:
+            raise RuntimeError(f"Reverse pre-grasp did not reach standby ({err:.3f} deg)")
+        return self.robot.q.copy()
+
+    def finish_cycle_and_home(self, printer, recorder=None):
+        """Return from closed handle to standby, then rail home (robot stays standby)."""
+        self.release_closed_handle_and_standby(printer, recorder=recorder)
+        self.scenery.home(self.env)
+        print("FULL CYCLE COMPLETE | door closed | robot standby | rail home")
+        return True
 
     # Camera pose is defined in the calibrated plate-reference frame.
     CAMERA_XYZ_PLATE = np.array([-0.125, -0.150, 0.225])
