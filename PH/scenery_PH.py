@@ -31,6 +31,11 @@ ARC_HALF_SPAN = np.deg2rad(28)
 # E-stop in the table corner on the bucket (+y) side, beyond the arm's ~0.95 m reach
 ESTOP_LOCAL_XY = (0.9, 0.58)
 ESTOP_SIZE = 0.12  # approximate collision box for the e-stop mesh
+FENCE_SIDE_X = (-1.25, 1.75)
+FENCE_SIDE_Y = (-1.4, 0.1)
+FENCE_BACK_X = (-0.49, 1.03)
+FENCE_BACK_Y = -2.15
+FENCE_OPENING_Y = 0.85
 GENERAL_WORLD_XY = (-0.6, 0.85)
 TABLE_POSE = SE3(
     GENERAL_WORLD_XY[0] - GENERAL_LOCAL.t[0],
@@ -47,6 +52,29 @@ class SceneryPH:
         self.table = part_mesh(
             "tableBrown2.1x1.4x0.5m",
             pose=self.table_pose,
+        )
+        # The side and rear panels cover both table footprints; the +y side stays open for bucket and e-stop access.
+        self.fences = [
+            part_mesh(
+                "barrier1.5x0.2x1m",
+                pose=self.table_pose @ SE3(x, y, 0) @ SE3.Rz(np.pi / 2),
+            )
+            for x in FENCE_SIDE_X
+            for y in FENCE_SIDE_Y
+        ]
+        self.fences.extend(
+            part_mesh(
+                "barrier1.5x0.2x1m",
+                pose=self.table_pose @ SE3(x, FENCE_BACK_Y, 0),
+            )
+            for x in FENCE_BACK_X
+        )
+        self.fences.append(
+            part_mesh(
+                "SafetyGate",
+                pose=self.table_pose
+                @ SE3(FENCE_SIDE_X[0] - 0.527, FENCE_OPENING_Y, 0),
+            )
         )
         self.tx2_60 = tx2_60 if tx2_60 is not None else TX2_60(
             base=self.table_pose @ ROBOT_LOCAL
@@ -73,8 +101,10 @@ class SceneryPH:
         }
 
     def add_to_env(self, env):
-        """Add the table, TX2-60, and sorting buckets to a Swift environment."""
+        """Add the table, fences, TX2-60, and sorting buckets to a Swift environment."""
         env.add(self.table)
+        for fence in self.fences:
+            env.add(fence)
         self.tx2_60.base = self.table_pose @ ROBOT_LOCAL
         self.tx2_60.q_standby = START_Q.copy()
         self.robot = self.tx2_60.create_robot()
