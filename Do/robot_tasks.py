@@ -411,9 +411,12 @@ class RobotTasks:
 
 
 
-            q_solutions.append(solution.q.copy())
+            # Newer roboticstoolbox versions wrap IK joints to +/-pi; unwrap to stay continuous
+            q_continuous = q_guess + (solution.q - q_guess + pi) % (2 * pi) - pi
 
-            q_guess = solution.q.copy()
+            q_solutions.append(q_continuous.copy())
+
+            q_guess = q_continuous.copy()
 
 
 

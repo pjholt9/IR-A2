@@ -29,7 +29,7 @@ class TX2_60:
     """
 
     COLOURS = ("red", "green", "blue", "black", "brown")
-    MESH_COLOR = "#3478f6"
+    MESH_COLOR = "#ffff00"
     MESH_FILES = (
         "base_link.STL",
         "one_Link.STL",
@@ -241,14 +241,27 @@ class TX2_60:
         q_sol = self.robot.ikine_LM(target_pose, q0=self.robot.q)
         if not q_sol.success:
             raise RuntimeError(f"IK failed for target pose:\n{target_pose}")
-        return self.move_to_q(env, q_sol.q, steps)
+        return self.move_to_q(env, self._nearest_q(q_sol.q), steps)
+
+    def _nearest_q(self, q_target):
+        """Shift each joint by whole turns to the equivalent angle closest to the current one."""
+        q_now = self.robot.q
+        q_near = q_now + (q_target - q_now + pi) % (2 * pi) - pi
+        qlim = np.array([link.qlim for link in self.robot.links])
+        # Keep the wrapped angle only where it still respects the joint limits
+        ok = (q_near >= qlim[:, 0]) & (q_near <= qlim[:, 1])
+        return np.where(ok, q_near, q_target)
 
     def _downward_pose(self, pose, height=0.0):
         """Make a target pose with the tool's z-axis pointing down, optionally raised vertically."""
         pose = SE3(pose)
         position = pose.t + np.array([0.0, 0.0, height])
+        # Yaw follows the direction from the base, so joint 6 doesn't have to counter-rotate
+        # joint 1 as the arm swings between the buckets
+        offset = position - self.base.t
+        yaw = np.arctan2(offset[1], offset[0])
         # Rx(pi) flips the tool z-axis to point down, so the gripper approaches from above
-        return SE3(position) * SE3.Rx(pi)
+        return SE3(position) * SE3.Rz(yaw) * SE3.Rx(pi)
 
     def pick(self, obj, env, approach_height=None, steps=50):
         """Move above the object, descend, grasp it, then retreat to the approach height."""
@@ -284,9 +297,12 @@ class TX2_60:
 
         # The colour (from the camera classifier) selects the destination bucket pose
         bucket_pose = colour_bucket_poses[obj_colour]
+        # Parts that grasp above their resting-centre height (grasp_lift) need the bucket target raised
+        bucket_pose = SE3(0, 0, getattr(obj, "grasp_lift", 0.0)) * SE3(bucket_pose)
 
-        # Part is assumed to sit at the general bucket pose; no pose feedback (no visual servoing)
-        obj.T = SE3(general_bucket_pose).A
+        # Part is assumed to sit at the general bucket pose unless it reports its own pose (keep_pose)
+        if not getattr(obj, "keep_pose", False):
+            obj.T = SE3(general_bucket_pose).A
         self.pick(obj, env, steps=steps)
         self.place(bucket_pose, env, steps=steps)
         return obj_colour
@@ -307,6 +323,8 @@ class TX2_60:
             self.busy = True
             obj, obj_colour = self.pending_parts.pop(0)
             self.sort_part(env, obj, obj_colour, general_bucket_pose, colour_bucket_poses, steps=steps)
+            # Leave the bucket area so a person can reach in and take the sorted part
+            self.move_to_q(env, self._nearest_q(self.q_standby), steps)
             self.busy = False
 
             if on_sorted is not None:

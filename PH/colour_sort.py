@@ -75,8 +75,8 @@ class SimulatedCamera:
         self.white_saturation_threshold = white_saturation_threshold
         self.dark_pixel_threshold = dark_pixel_threshold
         self.object_present = False
-        self.last_rgb = None
         self._fig = None
+        self._closed_figs = []
 
     def capture(self):
         """Return the path of a randomly selected image, as if photographing the object."""
@@ -145,6 +145,9 @@ class SimulatedCamera:
             import matplotlib.pyplot as plt
 
             plt.close(self._fig)
+            # Tk objects must not be garbage-collected from another thread (the Do robot's),
+            # so keep the closed figure alive instead of letting it be freed there
+            self._closed_figs.append(self._fig)
             self._fig = None
 
     def pump(self):

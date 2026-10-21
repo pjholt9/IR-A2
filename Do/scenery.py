@@ -52,7 +52,7 @@ class Scenery:
         self.plate_markers = []
         for printer in self.printers:
             marker = Sphere(radius=0.012, pose=printer.plate_reference,
-                            color=[0, 1, 0, 1])
+                            color=[0.0, 1.0, 0.0, 1.0])
             marker._collision = False
             self.plate_markers.append(marker)
 
