@@ -39,7 +39,15 @@ class EStop:
         self.reset_button.pack(side="left", expand=True, fill="x", padx=(0, 5))
         self.restart_button = ttk.Button(row, text="2. Restart", command=self.restart)
         self.restart_button.pack(side="left", expand=True, fill="x", padx=(5, 0))
+        # Optional hook: while it returns True, Reset is refused (e.g. a person is still in the cell)
+        self.reset_blocked = lambda: False
         self._refresh()
+
+    def add_button(self, text, command):
+        """Add an extra full-width button under the E-STOP controls and return it."""
+        button = ttk.Button(self.root, text=text, command=command)
+        button.pack(fill="x", padx=10, pady=(0, 10))
+        return button
 
     @property
     def stopped(self):
@@ -52,7 +60,7 @@ class EStop:
 
     def reset(self):
         """Clear the stop latch. Only allowed from STOPPED; the arm still does not move."""
-        if self.state == STOPPED:
+        if self.state == STOPPED and not self.reset_blocked():
             self.state = RESET_REQUIRED
             self._refresh()
 
@@ -64,12 +72,14 @@ class EStop:
 
     def _refresh(self):
         self.status.config(text=self.state, bg=STATE_COLOURS[self.state])
-        self.reset_button.state(["!disabled"] if self.state == STOPPED else ["disabled"])
+        can_reset = self.state == STOPPED and not self.reset_blocked()
+        self.reset_button.state(["!disabled"] if can_reset else ["disabled"])
         self.restart_button.state(["!disabled"] if self.state == RESET_REQUIRED else ["disabled"])
 
     def pump(self):
         """Process GUI events; call from every simulation step so the buttons stay responsive."""
         try:
+            self._refresh()
             self.root.update()
         except tk.TclError:
             pass

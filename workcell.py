@@ -23,7 +23,9 @@ from printed_part import PART_CONFIG, PrintedPart, centered_part_offset
 from robot_tasks import RobotTasks
 
 from PH.colour_sort import SimulatedCamera
+from PH.hazards import PERSON_FORWARD_YAW, Apple, Visitor
 from PH.manual_control import run_manual_control
+from PH.safety import EStop
 from PH.scenery_PH import BUCKET_WIDTH, PART_RADIUS, SceneryPH
 
 
@@ -41,7 +43,6 @@ PERSON_STAND_OFFSET = 0.75  # how far beyond the bucket (+y) the person stands
 PERSON_START_DISTANCE = 3.0  # how far back they start walking from
 PERSON_PAUSE = 1.5  # seconds spent reaching in for the part
 PERSON_CARRY_HEIGHT = 1.0  # height of the carried part above the floor
-PERSON_FORWARD_YAW = 0.0  # extra yaw if the mesh's front isn't along its +x axis
 PARKED_POSITION = (100.0, 100.0, -100.0)  # where finished/removed meshes are hidden
 
 
@@ -75,10 +76,11 @@ class SortablePart:
 class _LockedEnv:
     """Env view for the Do thread: same Swift scene, but step() is serialised by a lock."""
 
-    def __init__(self, env, step, lock):
+    def __init__(self, env, step, lock, gate):
         self._env = env
         self._step = step
         self._lock = lock
+        self._gate = gate
         self._pending = 0.0
 
     def add(self, *args, **kwargs):
@@ -97,6 +99,8 @@ class _LockedEnv:
         self._step(dt)
 
     def step(self, dt=0.05, *args, **kwargs):
+        # Frozen while the E-stop is latched, even for steps that wouldn't render a frame
+        self._gate()
         # Shorter sim time per sample, and only render once a display frame's worth has built up:
         # Swift's per-frame overhead otherwise caps how fast the arm can move
         self._pending += dt / DO_SPEEDUP
@@ -125,13 +129,16 @@ def _create_do_scenery():
         Mesh.__init__ = mesh_init
 
 
-def setup_scene(headless=False, headless_cycles=1):
+def setup_scene(headless=False, headless_cycles=1, safety_gui=None):
     """Create the Swift environment, both scenery sections, and camera callbacks.
 
     The Do robot runs on a worker thread, so Swift stepping is serialised by a lock. The
-    camera (matplotlib) is only ever touched from the main thread: the Do thread calls
-    the returned on_part_dropped, which just hands the part over to the main thread.
+    camera and the safety window (Tk) are only ever touched from the main thread: the Do
+    thread calls the returned on_part_dropped, which just hands the part over to it.
+    safety_gui defaults to on unless headless.
     """
+    if safety_gui is None:
+        safety_gui = not headless
     env = swift.Swift()
     env.launch(realtime=not headless, headless=headless)
 
@@ -149,7 +156,42 @@ def setup_scene(headless=False, headless_cycles=1):
     dropped = queue.Queue()
     errors = []
 
+    estop = apple = visitor = None
+    if safety_gui:
+        estop = EStop()
+        scenery_ph.tx2_60.safety = estop
+        apple = Apple(env, scenery_ph.table_pose, scenery_ph.tx2_60)
+        visitor = Visitor(env, scenery_ph.table_pose, estop)
+        # A person still in the cell blocks the Reset button
+        estop.reset_blocked = lambda: visitor.inside
+
+        def toggle_apple():
+            on = apple.toggle()
+            apple_button.config(text="Remove obstacle" if on else "Add obstacle")
+
+        apple_button = estop.add_button("Add obstacle", toggle_apple)
+        estop.add_button("Person walks in (light curtain)", visitor.trigger)
+
+    def hold_if_stopped():
+        """Freeze the whole system while the E-stop is latched.
+
+        The main thread keeps the GUI and the walking person alive (and renders them); the
+        Do thread just waits. Nothing else advances, so both arms hold still.
+        """
+        if estop is None:
+            return
+        on_main = threading.current_thread() is threading.main_thread()
+        while estop.stopped:
+            if on_main:
+                estop.pump()
+                visitor.update(0.05)
+                with step_lock:
+                    swift_step(0.05)
+            else:
+                time.sleep(0.05)
+
     def locked_step(*args, **kwargs):
+        hold_if_stopped()
         with step_lock:
             swift_step(*args, **kwargs)
         # Python locks aren't fair; yield so the other robot's thread gets a turn
@@ -169,6 +211,11 @@ def setup_scene(headless=False, headless_cycles=1):
     def step_and_pump_camera(*args, **kwargs):
         locked_step(*args, **kwargs)
         camera.pump()
+        if estop is not None:
+            estop.pump()
+            dt = args[0] if args else kwargs.get("dt", 0.05)
+            apple.update(dt)
+            visitor.update(dt)
         if errors:
             raise RuntimeError("Do robot sequence failed") from errors[0]
         while not dropped.empty():
@@ -192,7 +239,7 @@ def setup_scene(headless=False, headless_cycles=1):
         if headless and sorted_count[0] >= headless_cycles:
             raise SystemExit(0)
 
-    do_env = _LockedEnv(env, locked_step, step_lock)
+    do_env = _LockedEnv(env, locked_step, step_lock, hold_if_stopped)
     return (env, do_env, scenery_ph, scenery_do, on_part_dropped, on_part_sorted,
             sorted_event, errors)
 
@@ -326,13 +373,13 @@ def run_do_loop(do_env, scenery_ph, scenery_do, on_part_dropped, sorted_event):
         printer, part = spawn_random_part(do_env, scenery_do)
 
 
-def main(headless=False, cycles=1):
+def main(headless=False, cycles=1, safety_gui=None):
     """Run Do's pick-and-drop and the TX2-60 sorting together, or the manual-control interface.
 
     Repeats indefinitely; with headless=True it stops after `cycles` sorted parts.
     """
     (env, do_env, scenery_ph, scenery_do,
-     on_part_dropped, on_part_sorted, sorted_event, errors) = setup_scene(headless, cycles)
+     on_part_dropped, on_part_sorted, sorted_event, errors) = setup_scene(headless, cycles, safety_gui)
     tx2_60 = scenery_ph.tx2_60
 
     if MANUAL_CONTROL:
