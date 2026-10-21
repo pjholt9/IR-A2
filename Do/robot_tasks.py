@@ -377,11 +377,8 @@ class RobotTasks:
 
 
 
-            door.update_angle(angle)
-
-
-
-            T_handle = door.get_handle_pose()
+            # Planning must be pure: never animate the door during IK.
+            T_handle = door.get_handle_pose(angle)
 
             T_target = T_handle @ SE3.Rx(-pi/2)
 
@@ -482,21 +479,14 @@ class RobotTasks:
 
 
 
-        # Animate door and robot together
-
+        # Animate door and robot together (atomic frame when supported).
         for i in range(1, len(angles)):
-
-
-
-            door.update_angle(angles[i])
-
-            robot.q = q_solutions[i].copy()
-
-
-
-            env.step(0.05)
-
-
+            if hasattr(env, "step_with_pose"):
+                env.step_with_pose(robot, q_solutions[i], door, angles[i], 0.05)
+            else:
+                door.update_angle(angles[i])
+                robot.q = q_solutions[i].copy()
+                env.step(0.05)
 
             recorder.record(0.05, "Door opening")
 
@@ -555,6 +545,54 @@ class RobotTasks:
             robot.q = np.asarray(q, dtype=float).copy()
             self.env.step(dt)
             recorder.record(dt, label)
+
+    def return_to_standby_via_clearance(self, printer, waypoint_path, recorder=None,
+                                        steps_per_segment=200, dt=0.02):
+        """Post-drop -> taught joint waypoint -> standby, for either printer.
+
+        Used ONLY after part drop; all earlier standby calls stay unchanged.
+        This validates joint limits, not geometric collision clearance.
+        """
+        import json
+        from pathlib import Path
+
+        recorder = self._task_recorder(printer, recorder)
+        path = Path(waypoint_path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        q_deg = np.asarray(data["q_deg"], dtype=float)
+        q_standby = np.asarray(self.scenery.ec66.q_standby, dtype=float)
+        q_start = np.asarray(self.robot.q, dtype=float).copy()
+        if q_deg.shape != q_start.shape or not np.all(np.isfinite(q_deg)):
+            raise ValueError("Clearance JSON must contain six finite joint angles")
+        q_waypoint = np.deg2rad(q_deg)
+        if np.max(np.abs(q_waypoint - q_standby)) < np.deg2rad(0.2):
+            raise ValueError("Clearance waypoint is the same as standby")
+
+        segments = [
+            (q_start, q_waypoint, "Post-drop to taught clearance"),
+            (q_waypoint, q_standby, "Taught clearance to standby"),
+        ]
+        qlim = np.asarray(self.robot.qlim, dtype=float)
+        if qlim.shape != (2, q_start.size):
+            raise RuntimeError(f"Unexpected robot joint-limit shape: {qlim.shape}")
+        low, high = qlim
+        paths = []
+        # Validate BOTH paths before moving, so a bad JSON never causes half a return.
+        for q0, q1, label in segments:
+            trajectory = np.asarray(jtraj(q0, q1, steps_per_segment).q, dtype=float)
+            if np.any((np.isfinite(low) & (trajectory < low - 1e-6)) |
+                      (np.isfinite(high) & (trajectory > high + 1e-6))):
+                raise RuntimeError(f"Joint limit violation: {label}")
+            paths.append((trajectory, label))
+
+        print(f"POST-DROP CLEARANCE | printer {self.scenery.printers.index(printer)+1} "
+              f"| q_deg={np.round(q_deg, 2).tolist()}")
+        for trajectory, label in paths:
+            for q in trajectory[1:]:
+                self.robot.q = q.copy()
+                self.env.step(dt)
+                recorder.record(dt, label)
+        return self.robot.fkine(self.robot.q)
 
     def retract_from_door(self, printer, distance=0.10, recorder=None):
         """RMRC retreat along the open handle EE's negative local Z axis.
@@ -744,9 +782,12 @@ class RobotTasks:
         worst_mm = 0.0
         worst_deg = 0.0
         for i in range(89, -1, -1):
-            printer.door.update_angle(float(angles[i]))
-            self.robot.q = opening_q[i].copy()
-            self.env.step(0.05)
+            if hasattr(self.env, "step_with_pose"):
+                self.env.step_with_pose(self.robot, opening_q[i], printer.door, float(angles[i]), 0.05)
+            else:
+                printer.door.update_angle(float(angles[i]))
+                self.robot.q = opening_q[i].copy()
+                self.env.step(0.05)
             recorder.record(0.05, 'Door closing (reverse playback)')
             target = printer.door.get_handle_pose() @ SE3.Rx(-pi/2)
             actual = self.robot.fkine(self.robot.q)

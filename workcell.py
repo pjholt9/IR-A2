@@ -2,7 +2,6 @@
 
 import json
 import queue
-import random
 import sys
 import threading
 import time
@@ -35,7 +34,7 @@ PRE_DROP_WAYPOINT = DO_DIR / "pre_drop_waypoint.json"
 PART_COLOUR = {"body": "brown", "barrel": "black"}
 PART_IMAGE = {"body": "BrownPart.jpg", "barrel": "BlackPart.jpg"}
 GRASP_FRACTION = 0.5  # TX2-60 grips the printed part at this fraction of its height
-DO_SPEEDUP = 10.0  # Do's arm motion is played this many times faster than real time
+DO_SPEEDUP = 5.0  # Do's arm motion is played this many times faster than real time
 DO_FRAME_DT = 0.02  # simulated seconds between rendered frames of Do's arm
 PERSON_SPEED = 1.2  # walking speed, m/s
 PERSON_DT = 0.05  # simulated seconds per walking frame
@@ -108,6 +107,23 @@ class _LockedEnv:
             pending, self._pending = self._pending, 0.0
             self._step(pending, *args, **kwargs)
 
+    def step_with_pose(self, robot, q, door, angle, dt=0.05):
+        """Render a door/robot pair atomically, every opening/closing sample.
+
+        No frame skipping for synchronized contact motion. Respect E-stop first.
+        """
+        self._gate()
+        with self._lock:
+            door.update_angle(float(angle))
+            robot.q = np.asarray(q, dtype=float).copy()
+            # Flush accumulated time from ordinary motions before the contact frame.
+            frame_dt = self._pending + dt / DO_SPEEDUP
+            self._pending = 0.0
+            # Call the original locked Swift step, NOT env.step (which also pumps Tk).
+            # env.step is wrapped by step_and_pump_camera and is main-thread-only.
+            self._step(frame_dt)
+        time.sleep(0.001)
+
     def __getattr__(self, name):
         return getattr(self._env, name)
 
@@ -129,7 +145,7 @@ def _create_do_scenery():
         Mesh.__init__ = mesh_init
 
 
-def setup_scene(headless=False, headless_cycles=1, safety_gui=None):
+def setup_scene(headless=False, headless_cycles=1, safety_gui=None, controller=None):
     """Create the Swift environment, both scenery sections, and camera callbacks.
 
     The Do robot runs on a worker thread, so Swift stepping is serialised by a lock. The
@@ -163,14 +179,24 @@ def setup_scene(headless=False, headless_cycles=1, safety_gui=None):
         apple = Apple(env, scenery_ph.table_pose, scenery_ph.tx2_60)
         visitor = Visitor(env, scenery_ph.table_pose, estop)
         # A person still in the cell blocks the Reset button
-        estop.reset_blocked = lambda: visitor.inside
+        estop.reset_blocked = lambda: visitor.inside or apple.active
 
         def toggle_apple():
             on = apple.toggle()
             apple_button.config(text="Remove obstacle" if on else "Add obstacle")
 
-        apple_button = estop.add_button("Add obstacle", toggle_apple)
-        estop.add_button("Person walks in (light curtain)", visitor.trigger)
+        # Keep Patrick's incident simulation, but make the apple a latched
+        # whole-cell stop (rather than TX2-60-only collision avoidance).
+        def apple_incident():
+            on = apple.toggle()
+            apple_button.config(text="Remove obstacle" if on else "Obstacle Intrusion (Apple)")
+            if on:
+                estop.press()
+
+        apple_button = estop.add_button("Obstacle Intrusion (Apple)", apple_incident)
+        estop.add_button("Person Intrusion (Light Curtain)", visitor.trigger)
+        if controller is not None:
+            controller.install_gui(estop, scenery_do)
 
     def hold_if_stopped():
         """Freeze the whole system while the E-stop is latched.
@@ -209,8 +235,13 @@ def setup_scene(headless=False, headless_cycles=1, safety_gui=None):
         scenery_ph.tx2_60.queue_part(part, colour)
 
     def step_and_pump_camera(*args, **kwargs):
+        # The Swift scene is shared with a worker thread; Tk must never be pumped there.
         locked_step(*args, **kwargs)
+        if threading.current_thread() is not threading.main_thread():
+            return
         camera.pump()
+        if controller is not None:
+            controller.pump()
         if estop is not None:
             estop.pump()
             dt = args[0] if args else kwargs.get("dt", 0.05)
@@ -285,7 +316,9 @@ def run_do_sequence(do_env, scenery_ph, scenery_do, on_part_dropped, printer, pa
         pre_drop_pose=T_pre,
     )
     tasks.execute_part_drop(part, plan, recorder=recorder)
-    tasks.return_to_standby(printer)
+    tasks.return_to_standby_via_clearance(
+        printer, DO_DIR / "post_drop_clearance.json", recorder=recorder
+    )
     # Do's arm is now clear of the bin: the TX2-60 can sort while Do closes the door and homes
     on_part_dropped(SortablePart(part), ROOT_DIR / "PH" / "part_images" / PART_IMAGE[part.kind])
     tasks.return_to_open_handle(printer)
@@ -293,25 +326,106 @@ def run_do_sequence(do_env, scenery_ph, scenery_do, on_part_dropped, printer, pa
     tasks.finish_cycle_and_home(printer, recorder=recorder)
 
 
-def spawn_random_part(do_env, scenery_do):
-    """Print a random part in a random printer (the old part and markers are already gone)."""
-    # Debug pick markers belong to the original part only
-    for marker in scenery_do.pick_markers.values():
-        do_env.hide(marker)
-    scenery_do.pick_markers.clear()
-
-    printer = random.choice(scenery_do.printers)
-    kind = random.choice(list(PART_COLOUR))
+def spawn_selected_part(do_env, scenery_do, printer, kind):
+    """Spawn only on operator request, at the calibrated Bambu Studio origin."""
+    if kind not in PART_COLOUR:
+        raise ValueError(f"Unknown part type: {kind}")
+    # The printer must have no existing queued or in-progress part.
+    old_marker = scenery_do.pick_markers.pop(printer, None)
+    if old_marker is not None:
+        do_env.hide(old_marker)
     part = PrintedPart(
         plate_reference=printer.bambu_origin,
         kind=kind,
         offset=centered_part_offset(kind),
     )
-    scenery_do.parts = {printer: part}
+    scenery_do.parts[printer] = part
     do_env.add(part.mesh)
     part._env = do_env
-    print(f"New {kind} part printed in printer {scenery_do.printers.index(printer) + 1}")
-    return printer, part
+    print(f"Spawned {kind} in printer {scenery_do.printers.index(printer) + 1}")
+    return part
+
+
+class ProductionController:
+    """Thread-safe operator commands; Tk callbacks never execute robot motions."""
+
+    def __init__(self):
+        self.commands = queue.Queue()
+        self.updates = queue.Queue()
+        self.pending = {}  # printer index -> PrintedPart, owned by worker
+        self.busy = False
+        self.estop = None
+        self.status = None
+        self.printer_labels = {}
+        self.start_button = None
+
+    def install_gui(self, estop, scenery_do):
+        import tkinter as tk
+        from tkinter import ttk
+        self.estop = estop
+        root = estop.root
+        root.title("Industrial Robotics | EC66 + TX2-60")
+        root.geometry("430x690")
+        estop.status.config(font=("Arial", 13, "bold"))
+        frame = ttk.LabelFrame(root, text="Production Control")
+        # Existing E-stop and incident buttons stay visible and functional.
+        frame.pack(fill="x", padx=10, pady=(5, 8), before=estop.stop_button)
+        ttk.Label(frame, text="AUTOMATIC MODE", font=("Arial", 12, "bold")).pack(pady=5)
+        ttk.Button(frame, text="MANUAL / TEACH  (Coming soon)",
+                   command=lambda: self._show_manual_placeholder(root)).pack(fill="x", padx=8, pady=4)
+        for i in (0, 1):
+            sub = ttk.LabelFrame(frame, text=f"Printer {i + 1}")
+            sub.pack(fill="x", padx=8, pady=4)
+            row = ttk.Frame(sub)
+            row.pack(fill="x", padx=5, pady=4)
+            ttk.Button(row, text="Spawn Barrel", command=lambda n=i: self.request_spawn(n, "barrel")).pack(side="left", expand=True, fill="x", padx=2)
+            ttk.Button(row, text="Spawn Body", command=lambda n=i: self.request_spawn(n, "body")).pack(side="left", expand=True, fill="x", padx=2)
+            lbl = ttk.Label(sub, text="Empty")
+            lbl.pack(pady=(0, 3))
+            self.printer_labels[i] = lbl
+        self.start_button = ttk.Button(frame, text="START ONE CYCLE", command=self.request_start)
+        self.start_button.pack(fill="x", padx=8, pady=7)
+        self.status = ttk.Label(frame, text="READY — spawn a part to begin", wraplength=380)
+        self.status.pack(padx=8, pady=(0, 8))
+
+    def _show_manual_placeholder(self, root):
+        import tkinter as tk
+        win = tk.Toplevel(root)
+        win.title("Manual / Teach Mode")
+        win.geometry("340x130")
+        tk.Label(win, text="Manual / Teach Mode — Phase 2", font=("Arial", 12, "bold")).pack(pady=18)
+        tk.Label(win, text="Automatic mode is active; teach control is not enabled.").pack()
+
+    def request_spawn(self, index, kind):
+        if self.estop.stopped or self.busy:
+            self.status.config(text="Cannot spawn while stopped or while a cycle is running")
+            return
+        self.commands.put(("spawn", index, kind))
+        self.status.config(text=f"Requested {kind} in Printer {index + 1}...")
+
+    def request_start(self):
+        if self.estop.stopped or self.busy:
+            self.status.config(text="Reset + Restart safety before starting; or wait for cycle")
+            return
+        self.commands.put(("start",))
+        self.status.config(text="Start requested...")
+
+    def pump(self):
+        # Called only from the main simulation thread.
+        while True:
+            try:
+                msg = self.updates.get_nowait()
+            except queue.Empty:
+                break
+            tag = msg[0]
+            if tag == "status":
+                self.status.config(text=msg[1])
+            elif tag == "printer":
+                self.printer_labels[msg[1]].config(text=msg[2])
+            elif tag == "busy":
+                self.busy = msg[1]
+                self.start_button.state(["disabled"] if self.busy else ["!disabled"])
+
 
 
 def person_collects_part(do_env, scenery_ph, part, colour):
@@ -360,17 +474,75 @@ def person_collects_part(do_env, scenery_ph, part, colour):
     do_env.hide(person)
 
 
-def run_do_loop(do_env, scenery_ph, scenery_do, on_part_dropped, sorted_event):
-    """Repeat the cycle forever: a person collects each sorted part, then a new one is printed."""
+def run_operator_loop(controller, do_env, scenery_ph, scenery_do, on_part_dropped, sorted_event):
+    """One operator-selected cycle per START; no automatic random spawning."""
+    # Remove the default demonstration part so printers begin empty.
+    for printer, part in list(scenery_do.parts.items()):
+        do_env.hide(part.mesh)
+        scenery_do.parts.pop(printer, None)
+    for printer, marker in list(scenery_do.pick_markers.items()):
+        do_env.hide(marker)
+        scenery_do.pick_markers.pop(printer, None)
+    for index in (0, 1):
+        controller.updates.put(("printer", index, "Empty"))
+    controller.updates.put(("status", "READY — select a printer and spawn a part"))
+
+    while True:
+        command = controller.commands.get()
+        action = command[0]
+        if action == "spawn":
+            _, index, kind = command
+            if controller.busy or controller.estop.stopped:
+                controller.updates.put(("status", "Spawn refused: cell busy or safety stop active"))
+                continue
+            if index in controller.pending:
+                controller.updates.put(("status", f"Printer {index + 1} already contains a part"))
+                continue
+            printer = scenery_do.printers[index]
+            part = spawn_selected_part(do_env, scenery_do, printer, kind)
+            controller.pending[index] = part
+            controller.updates.put(("printer", index, f"Ready: {kind}"))
+            controller.updates.put(("status", "Part ready — press START ONE CYCLE"))
+        elif action == "start":
+            if controller.busy or controller.estop.stopped:
+                controller.updates.put(("status", "Start refused: busy or safety stop active"))
+                continue
+            if not controller.pending:
+                controller.updates.put(("status", "Spawn a part before START"))
+                continue
+            index = next(iter(controller.pending))
+            part = controller.pending.pop(index)
+            printer = scenery_do.printers[index]
+            controller.busy = True
+            controller.updates.put(("busy", True))
+            controller.updates.put(("printer", index, f"Processing: {part.kind}"))
+            controller.updates.put(("status", f"RUNNING — Printer {index + 1} / {part.kind}"))
+            sorted_event.clear()
+            run_do_sequence(do_env, scenery_ph, scenery_do, on_part_dropped, printer, part)
+            # The sorting callback fires once TX2-60 returns to its waiting pose.
+            sorted_event.wait()
+            # Preserve Patrick's collection animation, but don't auto-spawn another part.
+            person_collects_part(do_env, scenery_ph, part, PART_COLOUR[part.kind])
+            scenery_do.parts.pop(printer, None)
+            controller.updates.put(("printer", index, "Empty"))
+            controller.busy = False
+            controller.updates.put(("busy", False))
+            controller.updates.put(("status", "CYCLE COMPLETE — waiting for operator"))
+
+
+
+def run_headless_loop(do_env, scenery_ph, scenery_do, on_part_dropped, sorted_event):
+    """Legacy headless regression mode (GUI operator mode does not use this)."""
+    import random
     printer = scenery_do.printer1
     part = scenery_do.parts[printer]
     while True:
-        run_do_sequence(do_env, scenery_ph, scenery_do, on_part_dropped, printer, part)
-        # Do is home; wait for the TX2-60 to finish sorting and return to its waiting pose
-        sorted_event.wait()
         sorted_event.clear()
+        run_do_sequence(do_env, scenery_ph, scenery_do, on_part_dropped, printer, part)
+        sorted_event.wait()
         person_collects_part(do_env, scenery_ph, part, PART_COLOUR[part.kind])
-        printer, part = spawn_random_part(do_env, scenery_do)
+        printer = random.choice(scenery_do.printers)
+        part = spawn_selected_part(do_env, scenery_do, printer, random.choice(list(PART_COLOUR)))
 
 
 def main(headless=False, cycles=1, safety_gui=None):
@@ -378,8 +550,10 @@ def main(headless=False, cycles=1, safety_gui=None):
 
     Repeats indefinitely; with headless=True it stops after `cycles` sorted parts.
     """
+    controller = ProductionController() if not headless and safety_gui is not False else None
     (env, do_env, scenery_ph, scenery_do,
-     on_part_dropped, on_part_sorted, sorted_event, errors) = setup_scene(headless, cycles, safety_gui)
+     on_part_dropped, on_part_sorted, sorted_event, errors) = setup_scene(
+        headless, cycles, safety_gui, controller=controller)
     tx2_60 = scenery_ph.tx2_60
 
     if MANUAL_CONTROL:
@@ -389,7 +563,11 @@ def main(headless=False, cycles=1, safety_gui=None):
 
     def worker():
         try:
-            run_do_loop(do_env, scenery_ph, scenery_do, on_part_dropped, sorted_event)
+            if controller is not None:
+                run_operator_loop(controller, do_env, scenery_ph, scenery_do, on_part_dropped, sorted_event)
+            else:
+                # Headless regression mode retains the original automated sequence.
+                run_headless_loop(do_env, scenery_ph, scenery_do, on_part_dropped, sorted_event)
         except BaseException as exc:
             errors.append(exc)
 

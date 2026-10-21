@@ -1,0 +1,13 @@
+{
+  "printer": "both",
+  "purpose": "post_drop_to_standby_clearance",
+  "q_deg": [
+    113.0,
+    -77.5,
+    -51.1,
+    -58.1,
+    -205.0,
+    180.0
+  ],
+  "note": "Recovered from teach screenshot (0.1 degree precision). Visually tested on printer 2 by user; verify both printers in full simulation. Not geometrically collision-checked."
+}

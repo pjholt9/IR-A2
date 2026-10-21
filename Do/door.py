@@ -44,8 +44,10 @@ class Door:
     def close_door(self, env, steps=200):
         self.open_door(env, angle=0, steps=steps)
         
-    def get_handle_pose(self):
-        return self.hinge_pose @ SE3.Rz(self.angle) @ self.handle_offset
+    def get_handle_pose(self, angle=None):
+        """Compute handle pose without changing rendered door geometry."""
+        theta = self.angle if angle is None else float(angle)
+        return self.hinge_pose @ SE3.Rz(theta) @ self.handle_offset
 
     def add_to_env(self, env):
         env.add(self.door)
