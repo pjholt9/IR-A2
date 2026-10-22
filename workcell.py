@@ -198,22 +198,16 @@ def setup_scene(headless=False, headless_cycles=1, safety_gui=None, controller=N
         scenery_ph.tx2_60.safety = estop  # my arm checks this every step and holds when it's latched
         apple = Apple(env, scenery_ph.table_pose, scenery_ph.tx2_60)
         visitor = Visitor(env, scenery_ph.table_pose, estop)
-        # A person still in the cell blocks the Reset button
-        estop.reset_blocked = lambda: visitor.inside or apple.active
+        # only a person inside the cell blocks the Reset button (the apple isn't a stop)
+        estop.reset_blocked = lambda: visitor.inside
 
+        # the apple is just an obstacle: it doesn't stop anything, my arm waits for it to
+        # move out of the way (collision check in tx2_60) and carries on
         def toggle_apple():
             on = apple.toggle()
             apple_button.config(text="Remove obstacle" if on else "Add obstacle")
 
-        # Keep Patrick's incident simulation, but make the apple a latched
-        # whole-cell stop (rather than TX2-60-only collision avoidance).
-        def apple_incident():
-            on = apple.toggle()
-            apple_button.config(text="Remove obstacle" if on else "Obstacle Intrusion (Apple)")
-            if on:
-                estop.press()
-
-        apple_button = estop.add_button("Obstacle Intrusion (Apple)", apple_incident)
+        apple_button = estop.add_button("Add obstacle", toggle_apple)
         estop.add_button("Person Intrusion (Light Curtain)", visitor.trigger)
         # production buttons + manual panel get added to the same window
         if controller is not None:
