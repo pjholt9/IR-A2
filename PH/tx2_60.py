@@ -18,13 +18,12 @@ class TX2_60:
     """Staubli TX2-60 sorting arm.
 
     Motion pipeline used by the sorting task (pick -> place):
-      1. Waypoints: Cartesian poses (above part, at part, above bin, at bin, retreat).
-      2. Inverse kinematics (move_to_pose): ikine_LM turns each waypoint into joint angles.
-      3. Trajectory generation (move_to_q): jtraj gives a smooth joint-space path between poses.
-      4. Collision avoidance (_wait_until_clear): every step is checked against obstacles
-         and the arm pauses until the way is clear.
-    RMRC (damped least squares, Cartesian straight lines) is demonstrated separately in
-    tx2_60_rmrc_test.py, with singularity analysis in tx2_60_kinematic_analysis.py.
+      1. Travel between poses uses move_to_pose: ikine_LM finds joint angles and
+         move_to_q generates a smooth joint-space trajectory with jtraj.
+      2. Straight Cartesian approach, descent, and retreat legs use RMRC in move_linear.
+      3. Collision avoidance (_wait_until_clear) checks each proposed step and pauses
+         the arm until the way is clear.
+    Singularity analysis is in tx2_60_kinematic_analysis.py.
     Visual servoing is not implemented: colour_sort.py only classifies the part colour from
     an image, it doesn't feed image error back into the arm's motion.
     """
@@ -319,7 +318,7 @@ class TX2_60:
         """Move above the object, descend, grasp it, then retreat to the approach height."""
         obj_pose = SE3(obj.T) if hasattr(obj, "T") else SE3(obj)
         approach_height = self.APPROACH_HEIGHT if approach_height is None else approach_height
-        # Multi-pose plan: each leg is IK + a joint trajectory, collision-checked per step.
+        # Travel uses IK and a joint trajectory; the vertical approach and lift use RMRC.
         # Leg 1: go above the part so the final descent is a clean vertical approach
         self.move_to_pose(env, self._downward_pose(obj_pose, self.GRASP_HEIGHT + approach_height), steps)
         # Leg 2: descend onto the part in a straight line
