@@ -39,6 +39,7 @@ class ManualPanel:
         self.falling = False
         self.q_target = None
         self.part = Sphere(radius=PART_RADIUS, color="orange", pose=SE3(*PARKED))
+        self.part._collision = False
         env.add(self.part)
 
     # The panel remains active while its close animation returns the arm to standby.
@@ -116,6 +117,16 @@ class ManualPanel:
         ttk.Button(buttons, text="Exit manual mode (return to standby)", command=self.close).pack(fill="x", pady=2)
         self._set_grip_text()
         self.last_safe = np.asarray(robot.q, dtype=float).copy()
+        # One-shot diagnostics: show whether the workcell collision objects are registered.
+        obs = self.tx2_60.obstacles
+        print(f"[TX2 COLLISION DEBUG] Manual opened | obstacles={len(obs)}", flush=True)
+        for i, obstacle in enumerate(obs):
+            try:
+                centre = np.asarray(obstacle.T, dtype=float)[:3, 3]
+                scale = getattr(obstacle, "scale", "unknown")
+                print(f"  [{i:02d}] {type(obstacle).__name__} center={np.round(centre, 3)} scale={scale}", flush=True)
+            except Exception as exc:
+                print(f"  [{i:02d}] {type(obstacle).__name__} inspection failed: {exc}", flush=True)
 
     # Convert the requested XYZ point to a downward-facing tool pose, then let IK check reachability.
     def on_xyz_change(self):
@@ -215,6 +226,9 @@ class ManualPanel:
         q = robot.q + np.clip(target - robot.q, -MAX_JOINT_STEP, MAX_JOINT_STEP)
         # Collision rejection keeps the robot at the last pose known to be clear.
         hit = bool(tx2_60.obstacles) and in_collision(robot, q, tx2_60.obstacles)
+        if hit and not getattr(self, "_last_collision_debug", False):
+            print(f"[TX2 COLLISION DEBUG] BLOCKED | obstacles={len(tx2_60.obstacles)} | q_deg={np.round(np.rad2deg(q), 1)}", flush=True)
+        self._last_collision_debug = bool(hit)
         if hit:
             # Refuse the move and put the sliders back at the last safe pose
             q = self.last_safe.copy()

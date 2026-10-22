@@ -28,6 +28,7 @@ from PH.colour_sort import SimulatedCamera
 from PH.hazards import PERSON_FORWARD_YAW, Apple, Visitor
 from PH.manual_control import run_manual_control
 from PH.manual_panel import ManualPanel
+from PH.ec66_manual_panel import EC66ManualPanel
 from PH.safety import EStop
 from PH.scenery_PH import BUCKET_WIDTH, PART_RADIUS, SceneryPH
 
@@ -211,6 +212,7 @@ def setup_scene(headless=False, headless_cycles=1, safety_gui=None, controller=N
         estop.add_button("Person Intrusion (Light Curtain)", visitor.trigger)
         # production buttons + manual panel get added to the same window
         if controller is not None:
+            controller.scenery_ph = scenery_ph
             controller.install_gui(estop, scenery_do, scenery_ph.tx2_60, env,
                                    scenery_ph.general_bucket_pose)
 
@@ -391,28 +393,50 @@ class ProductionController:
         self.status = None
         self.printer_labels = {}
         self.start_button = None
-        self.panel = None  # manual control panel, created in install_gui
+        self.panel = None  # TX2-60 manual control panel
+        self.ec66_panel = None  # EC66 + rail manual control panel
+        self.scenery_ph = None
+        self._tx_manual_obstacles = []
 
     # true while the manual window is open (or the arm is still walking back to standby)
     @property
     def manual(self):
-        return self.panel is not None and self.panel.active
+        return ((self.panel is not None and self.panel.active) or
+                (self.ec66_panel is not None and self.ec66_panel.active))
 
     # only allow manual mode when nothing is running, so the two modes can't fight over the arm
-    def request_manual(self, tx2_60):
-        if self.panel.active:
-            self.panel.open()
+    def request_manual(self, tx2_60, target="tx2"):
+        selected = self.ec66_panel if target == "ec66" else self.panel
+        other = self.panel if target == "ec66" else self.ec66_panel
+        if selected.active:
+            selected.open()
+        elif other.active:
+            self.status.config(text="Exit the other manual panel first")
         elif self.busy or tx2_60.busy or tx2_60.pending_parts or self.commands.qsize():
             self.status.config(text="Manual mode needs an idle cell: wait for the cycle to finish")
         elif self.estop.stopped:
             self.status.config(text="Reset + Restart safety before entering manual mode")
         else:
-            self.panel.open()
+            # Register bucket/table collision proxies only for TX2 manual testing.
+            # Automatic sorting intentionally retains its original obstacle set.
+            if target == "tx2" and self.scenery_ph is not None:
+                before = {id(o) for o in tx2_60.obstacles}
+                self.scenery_ph.register_obstacles()
+                self._tx_manual_obstacles = [o for o in tx2_60.obstacles if id(o) not in before]
+                print(f"[TX2 COLLISION] Manual obstacles registered: {len(self._tx_manual_obstacles)}; total={len(tx2_60.obstacles)}")
+            selected.open()
             self.status.config(text="MANUAL MODE: spawn/start disabled until you exit manual mode")
             self.start_button.state(["disabled"])
 
     # called by the panel once the arm is back at standby
     def _manual_closed(self):
+        # Restore the automatic collision set after the manual return to standby.
+        if self._tx_manual_obstacles and self.scenery_ph is not None:
+            blocked_ids = {id(o) for o in self._tx_manual_obstacles}
+            arm = self.scenery_ph.tx2_60
+            arm.obstacles[:] = [o for o in arm.obstacles if id(o) not in blocked_ids]
+            self._tx_manual_obstacles = []
+            print(f"[TX2 COLLISION] Manual obstacles removed; automatic total={len(arm.obstacles)}")
         self.status.config(text="Manual mode ended: arm back at standby")
         self.start_button.state(["disabled"] if self.busy else ["!disabled"])
 
@@ -431,8 +455,11 @@ class ProductionController:
         ttk.Label(frame, text="AUTOMATIC MODE", font=("Arial", 12, "bold")).pack(pady=5)
         # manual joint/XYZ/gripper window (opens when the button below is pressed)
         self.panel = ManualPanel(root, tx2_60, env, general_bucket_pose, on_close=self._manual_closed)
+        self.ec66_panel = EC66ManualPanel(root, scenery_do, estop, on_close=self._manual_closed)
         ttk.Button(frame, text="MANUAL: TX2-60 joints + gripper",
-                   command=lambda: self.request_manual(tx2_60)).pack(fill="x", padx=8, pady=4)
+                   command=lambda: self.request_manual(tx2_60, "tx2")).pack(fill="x", padx=8, pady=4)
+        ttk.Button(frame, text="MANUAL: EC66 joints + linear rail",
+                   command=lambda: self.request_manual(tx2_60, "ec66")).pack(fill="x", padx=8, pady=4)
         # one box per printer with spawn buttons for each part type
         for i in (0, 1):
             sub = ttk.LabelFrame(frame, text=f"Printer {i + 1}")
@@ -467,8 +494,10 @@ class ProductionController:
 
     def pump(self):
         # Called only from the main simulation thread.
-        if self.panel is not None:
+        if self.panel is not None and not self.estop.stopped:
             self.panel.pump()
+        if self.ec66_panel is not None:
+            self.ec66_panel.pump()
         # apply any status/printer/busy updates the worker thread has queued up
         while True:
             try:
