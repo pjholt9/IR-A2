@@ -261,6 +261,37 @@ class TX2_60:
             raise RuntimeError(f"IK failed for target pose:\n{target_pose}")
         return self.move_to_q(env, self._nearest_q(q_sol.q), steps)
 
+    def move_linear(self, env, target_pose, steps=50):
+        """Straight-line Cartesian move using resolved-motion rate control (RMRC)."""
+        # Start and goal positions of the end-effector
+        p0 = self.get_ee_pose().t
+        p1 = SE3(target_pose).t
+        # Constant Cartesian velocity for a straight line over steps * 0.02 s
+        v = (p1 - p0) / (steps * 0.02)
+        for i in range(steps):
+            # Where the end-effector should be at this step along the line
+            desired = p0 + (p1 - p0) * (i + 1) / steps
+            # Feedforward velocity plus position feedback; zeros hold the tool orientation
+            task_velocity = np.concatenate([v + 5.0 * (desired - self.get_ee_pose().t), [0, 0, 0]])
+            # Jacobian and its smallest singular value (small means close to a singularity)
+            J = self.robot.jacob0(self.robot.q)
+            sigma_min = np.linalg.svd(J, compute_uv=False)[-1]
+            # Damped least squares: more damping the closer we are to a singularity
+            damping = 0.01 + 1.2 * max(0, 0.08 - sigma_min)
+            qdot = J.T @ np.linalg.solve(J @ J.T + damping**2 * np.eye(6), task_velocity)
+            # Integrate the joint velocity over one 0.02 s step
+            q_next = self.robot.q + 0.02 * qdot
+            # Hold for obstacles and the e-stop before moving, like move_to_q
+            self._wait_until_clear(env, q_next)
+            self._wait_for_safety(env)
+            self.robot.q = q_next
+            # A held part follows the end-effector
+            if self.attached_object is not None:
+                self.attached_object.T = self.get_ee_pose() @ self.grasp_offset
+            env.step(0.02)
+            for hook in self.step_hooks:
+                hook(0.02)
+
         # Prefer an equivalent joint angle near the current pose without breaking limits.
     def _nearest_q(self, q_target):
         """Shift each joint by whole turns to the equivalent angle closest to the current one."""
@@ -291,13 +322,13 @@ class TX2_60:
         # Multi-pose plan: each leg is IK + a joint trajectory, collision-checked per step.
         # Leg 1: go above the part so the final descent is a clean vertical approach
         self.move_to_pose(env, self._downward_pose(obj_pose, self.GRASP_HEIGHT + approach_height), steps)
-        # Leg 2: descend onto the part
-        self.move_to_pose(env, self._downward_pose(obj_pose, self.GRASP_HEIGHT), steps)
+        # Leg 2: descend onto the part in a straight line
+        self.move_linear(env, self._downward_pose(obj_pose, self.GRASP_HEIGHT), steps)
         # Grasp: store the part's pose relative to the gripper so it rides along from now on
         self.attached_object = obj
         self.grasp_offset = self.get_ee_pose().inv() * obj_pose
         # Leg 3: lift straight back up before travelling, so the part clears the bucket rim
-        self.move_to_pose(env, self._downward_pose(obj_pose, self.GRASP_HEIGHT + approach_height), steps)
+        self.move_linear(env, self._downward_pose(obj_pose, self.GRASP_HEIGHT + approach_height), steps)
 
         # Lower the carried part into the bin, release it, and retreat above the rim.
     def place(self, bin_pose, env, approach_height=None, steps=50):
@@ -305,12 +336,12 @@ class TX2_60:
         approach_height = self.APPROACH_HEIGHT if approach_height is None else approach_height
         # Travel leg: from the lifted pick pose, a single joint-space move to above the bin
         self.move_to_pose(env, self._downward_pose(bin_pose, self.GRASP_HEIGHT + approach_height), steps)
-        # Lower the part into the bin
-        self.move_to_pose(env, self._downward_pose(bin_pose, self.GRASP_HEIGHT), steps)
+        # Lower the part into the bin in a straight line
+        self.move_linear(env, self._downward_pose(bin_pose, self.GRASP_HEIGHT), steps)
         # Release: the part stays where it was dropped
         self.attached_object = None
         # Retreat upward so the arm leaves clear of the bin
-        self.move_to_pose(env, self._downward_pose(bin_pose, self.GRASP_HEIGHT + approach_height), steps)
+        self.move_linear(env, self._downward_pose(bin_pose, self.GRASP_HEIGHT + approach_height), steps)
 
         # Choose the colour destination and run the full pick-and-place sequence.
     def sort_part(self, env, obj, obj_colour, general_bucket_pose, colour_bucket_poses, steps=50):
