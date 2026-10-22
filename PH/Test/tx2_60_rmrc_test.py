@@ -20,11 +20,13 @@ else:
     from tx2_60 import TX2_60
 
 
+# This small Cartesian test move is easy to inspect and starts away from a singularity.
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "analysis_output"
 START_Q = np.array([0.2, -1.0, -0.8, 0.2, -0.7, 0.5])
 TEST_DISPLACEMENT = np.array([0.025, 0.020, -0.015])
 
 
+# Keep the desired/actual paths and controller diagnostics together for plotting afterwards.
 @dataclass
 class RMRCResult:
     times: np.ndarray
@@ -36,6 +38,7 @@ class RMRCResult:
     damping_values: np.ndarray
 
 
+# The quintic blend starts and finishes gently, so the requested path has no abrupt speed changes.
 def quintic_blend(progress):
     """Return a zero-velocity, zero-acceleration quintic path blend and rate."""
     progress = float(np.clip(progress, 0.0, 1.0))
@@ -44,6 +47,7 @@ def quintic_blend(progress):
     return blend, rate
 
 
+# Follow a straight Cartesian translation while damping the inverse near singular configurations.
 def run_rmrc(
     tx2_60,
     start_q=START_Q,
@@ -104,6 +108,7 @@ def run_rmrc(
         # plus a P term that holds the starting orientation (angular error from tr2delta)
         current_pose = robot.fkine(q)
         pose_error = tr2delta(current_pose.A, initial_pose.A)
+        # Combine translation tracking and the correction that holds the starting orientation.
         task_velocity = np.concatenate(
             (
                 desired_velocity
@@ -117,7 +122,7 @@ def run_rmrc(
         sigma_min = float(singular_values[-1])
         # Adaptive damping: stays at minimum_damping while sigma_min >= damping_threshold,
         # then grows linearly as sigma_min falls below it, trading accuracy for bounded joint speeds
-        damping = minimum_damping + damping_gain * max(
+        damping = minimum_damping + damping_gain * max(  # Extra damping favours stable joint rates over exact tracking.
             0.0, damping_threshold - sigma_min
         )
         # Damped least squares: qdot = J^T (J J^T + damping^2 I)^-1 v
@@ -125,6 +130,7 @@ def run_rmrc(
             jacobian @ jacobian.T + damping**2 * np.eye(robot.n),
             task_velocity,
         )
+        # Cap the rates so a difficult pose cannot suddenly demand a huge joint-speed change.
         joint_velocity = np.clip(
             joint_velocity, -max_joint_speed, max_joint_speed
         )
@@ -179,10 +185,12 @@ def run_rmrc(
     )
 
 
+# Plot task-space tracking beside the joint motion and singularity/damping diagnostics.
 def plot_rmrc(result, output_dir):
     """Save Cartesian tracking, conditioning, damping, and joint plots."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Putting path error next to conditioning and damping makes their relationship easier to spot.
     figure = plt.figure(figsize=(15, 5))
     path_axis = figure.add_subplot(131, projection="3d")
     path_axis.plot(
@@ -248,6 +256,7 @@ def plot_rmrc(result, output_dir):
     plt.close(figure)
 
 
+# Run the controller checks, save figures, and optionally leave Swift open at the final pose.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--show", action="store_true")

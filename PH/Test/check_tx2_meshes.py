@@ -19,6 +19,7 @@ else:
     from tx2_60 import TX2_60
 
 
+# These limits catch frame or scale mistakes without making the check depend on mesh detail.
 REFERENCE_HEIGHT = 1.045
 MAX_BASE_DISTANCE = 1.3
 RANDOM_CONFIGURATION_COUNT = 10
@@ -26,6 +27,7 @@ RANDOM_SEED = 23
 STEPS_PER_CONFIGURATION = 10
 
 
+# Cover the reference pose, a small sweep of each joint, random poses, and standby.
 def test_configurations(tx2_60):
     q_ref, _ = find_reference(tx2_60.robot)
     configurations = [("q_ref", q_ref)]
@@ -46,6 +48,7 @@ def test_configurations(tx2_60):
     return configurations
 
 
+# Load vertices once so bounds checks don't depend on Swift's internal mesh representation.
 def load_mesh_vertices():
     mesh_dir = Path(__file__).resolve().parents[1] / "TX2_60meshes"
     meshes = []
@@ -58,10 +61,12 @@ def load_mesh_vertices():
     return meshes
 
 
+# Apply each calibrated link transform to its STL vertices to get world-space bounds.
 def world_vertices(tx2_60, q, local_vertices):
     frames = tx2_60.robot.fkine_all(q, old=False)
     transformed = []
     for index, vertices in enumerate(local_vertices):
+        # Link zero is fixed to the base; the rest move with their corresponding DH frames.
         transform = (
             tx2_60.base * tx2_60.MESH_OFFSETS[0]
             if index == 0
@@ -73,6 +78,7 @@ def world_vertices(tx2_60, q, local_vertices):
     return transformed
 
 
+# Check that Swift's meshes follow FK and that the assembled robot stays the expected size.
 def verify_configuration(env, tx2_60, name, q, local_vertices):
     robot = tx2_60.robot
     robot.q = q
@@ -93,7 +99,7 @@ def verify_configuration(env, tx2_60, name, q, local_vertices):
     vertices = world_vertices(tx2_60, q, local_vertices)
     all_vertices = np.vstack(vertices)
     relative = all_vertices - tx2_60.base.t
-    max_distance = float(np.abs(relative).max())
+    max_distance = float(np.abs(relative).max())  # The largest axis offset catches a mesh shifted too far from the base.
     if max_distance > MAX_BASE_DISTANCE:
         raise AssertionError(
             f"{name}: mesh bounds exceed +/-{MAX_BASE_DISTANCE} m "
@@ -115,11 +121,13 @@ def verify_configuration(env, tx2_60, name, q, local_vertices):
     )
 
 
+# Add small coordinate frames so it's easier to see each link's orientation in the viewer.
 def add_frame_axes(tx2_60):
     for link in tx2_60.robot.links:
         link.geometry = [*link.geometry, Axes(0.08)]
 
 
+# Interpolate between poses so the visual check shows link motion instead of teleporting.
 def animate_to(env, tx2_60, q):
     start = tx2_60.robot.q.copy()
     for q_step in np.linspace(start, q, STEPS_PER_CONFIGURATION):
@@ -127,6 +135,7 @@ def animate_to(env, tx2_60, q):
         env.step(0.02)
 
 
+# Run the same checks headlessly or in Swift, depending on the command-line flag.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

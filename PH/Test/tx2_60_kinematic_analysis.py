@@ -22,11 +22,13 @@ else:
     from tx2_60 import TX2_60
 
 
+# Fixed test poses keep comparisons repeatable; the random sample seed can still be set at run time.
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "analysis_output"
 IK_TEST_Q = np.array([0.2, -1.0, -0.8, 0.2, -0.7, 0.5])
 TRAJECTORY_END_Q = np.array([0.3, -0.9, -0.9, 0.35, -0.6, 0.4])
 
 
+# Sample legal joint angles to see the reachable region and how well-conditioned each pose is.
 def sample_workspace(tx2_60, sample_count=1200, seed=23):
     """Sample end-effector positions and translational manipulability."""
     robot = tx2_60.robot
@@ -41,17 +43,18 @@ def sample_workspace(tx2_60, sample_count=1200, seed=23):
         positions[index] = robot.fkine(q).t
         jacobian = robot.jacob0(q)
         singular_values = np.linalg.svd(jacobian, compute_uv=False)
-        minimum_singular_values[index] = singular_values[-1]
+        minimum_singular_values[index] = singular_values[-1]  # A small value flags a nearly singular pose.
         # Yoshikawa manipulability of the position rows only: sqrt(det(Jv Jv^T))
         translational_jacobian = jacobian[:3, :]
         eigenvalues = np.linalg.eigvalsh(
             translational_jacobian @ translational_jacobian.T
         )
-        manipulability[index] = np.sqrt(np.prod(np.maximum(eigenvalues, 0.0)))
+        manipulability[index] = np.sqrt(np.prod(np.maximum(eigenvalues, 0.0)))  # Clip tiny negative round-off before taking the square root.
 
     return positions, manipulability, minimum_singular_values
 
 
+# Try IK on a pose known to be reachable, then check a smooth joint-space move stays within limits.
 def verify_ik_and_joint_trajectory(tx2_60):
     """Check FK/IK recovery and joint-trajectory endpoint and limit behavior."""
     robot = tx2_60.robot
@@ -64,6 +67,7 @@ def verify_ik_and_joint_trajectory(tx2_60):
 
     recovered_pose = robot.fkine(solution.q)
     position_error = float(np.linalg.norm(recovered_pose.t - target_pose.t))
+    # tr2delta puts the small-angle orientation error after the three translation components.
     rotation_error = float(
         np.linalg.norm(tr2delta(recovered_pose.A, target_pose.A)[3:])
     )
@@ -89,10 +93,12 @@ def verify_ik_and_joint_trajectory(tx2_60):
     return trajectory, position_error, rotation_error
 
 
+# Plot the sampled workspace and the focused sweep that shows how the wrist singularity develops.
 def plot_analysis(positions, manipulability, q5_values, minimum_singular_values, output_dir):
     """Save workspace/manipulability and singularity-sweep figures."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Colouring points by manipulability highlights reachable areas that are harder to move through.
     figure = plt.figure(figsize=(9, 7))
     axis = figure.add_subplot(111, projection="3d")
     scatter = axis.scatter(
@@ -124,6 +130,7 @@ def plot_analysis(positions, manipulability, q5_values, minimum_singular_values,
     plt.close(figure)
 
 
+# Bring together the random samples, FK/IK checks, trajectory check, and joint-5 singularity sweep.
 def analyze(tx2_60, sample_count=1200, seed=23, output_dir=DEFAULT_OUTPUT_DIR):
     """Run numerical checks, save plots, and return the sampled data."""
     positions, manipulability, minimum_singular_values = sample_workspace(
@@ -181,6 +188,7 @@ def analyze(tx2_60, sample_count=1200, seed=23, output_dir=DEFAULT_OUTPUT_DIR):
     }
 
 
+# Parse run options, build a mesh-free arm, and save the analysis plots to the chosen folder.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=int, default=1200)

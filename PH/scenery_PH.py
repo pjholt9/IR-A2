@@ -9,6 +9,7 @@ else:
     from tx2_60 import TX2_60
 
 
+# Bucket and part dimensions are in metres, matching the robot's table-local layout.
 BUCKET_WIDTH = 0.24
 BUCKET_WALL_THICKNESS = 0.02
 BUCKET_WALL_HEIGHT = 0.15
@@ -23,6 +24,7 @@ DRAW_COLOURS = {
     "brown": "saddlebrown",
 }
 
+# These poses describe the workcell relative to the table, then place that table in the world.
 ROBOT_LOCAL = SE3(0.0, 0.0, TABLE_TOP)
 GENERAL_LOCAL = SE3(0.0, -0.5, TABLE_TOP + FLOOR_THICKNESS + PART_RADIUS)
 ARC_RADIUS = 0.5
@@ -31,6 +33,7 @@ ARC_HALF_SPAN = np.deg2rad(28)
 # E-stop in the table corner on the bucket (+y) side, beyond the arm's ~0.95 m reach
 ESTOP_LOCAL_XY = (0.9, 0.58)
 ESTOP_SIZE = 0.12  # approximate collision box for the e-stop mesh
+# Fence coordinates leave the +y entrance open for the person/light-curtain demo.
 FENCE_SIDE_X = (-1.25, 1.75)
 FENCE_SIDE_Y = (-1.4, 0.1)
 FENCE_BACK_X = (-0.49, 1.03)
@@ -45,9 +48,11 @@ TABLE_POSE = PH_WORKCELL_OFFSET @ SE3(
 )
 
 
+# Build the shared table scene and compute where the robot, general bin and colour bins sit on it.
 class SceneryPH:
     """Set up the TX2-60 sorting station on the IR support table model."""
 
+    # Keep scene construction separate from adding objects to Swift so poses can be inspected first.
     def __init__(self, table_pose=TABLE_POSE, tx2_60=None):
         self.table_pose = SE3(table_pose)
         self.table = part_mesh(
@@ -82,6 +87,7 @@ class SceneryPH:
 
         for fence in self.fences:
             fence._collision = False
+        # Reuse a supplied robot when integrating elsewhere; otherwise mount a new one at this table's robot pose.
         self.tx2_60 = tx2_60 if tx2_60 is not None else TX2_60(
             base=self.table_pose @ ROBOT_LOCAL
         )
@@ -90,6 +96,7 @@ class SceneryPH:
         self.estop = None
 
         self.general_bucket_pose = self.table_pose @ GENERAL_LOCAL
+        # Spread the colour bins over a small arc in front of the robot for reachable drop targets.
         angles = np.linspace(
             ARC_CENTRE - ARC_HALF_SPAN,
             ARC_CENTRE + ARC_HALF_SPAN,
@@ -106,6 +113,7 @@ class SceneryPH:
             for colour, angle in zip(COLOURS, angles)
         }
 
+    # Put the visual workcell into Swift and build the matching robot and bucket meshes.
     def add_to_env(self, env):
         """Add the table, fences, TX2-60, and sorting buckets to a Swift environment."""
         env.add(self.table)
@@ -131,6 +139,7 @@ class SceneryPH:
         env.add(self.estop)
         return self.tx2_60
 
+    # Collision-only geometry gives the arm planner simple shapes instead of testing detailed meshes.
     def register_obstacles(self):
         """Register the table top, buckets and e-stop as collision obstacles for the arm."""
         # Invisible slabs/boxes: only used by the ellipsoid collision check, never added to Swift
@@ -149,12 +158,14 @@ class SceneryPH:
             for piece in pieces:
                 self.tx2_60.add_obstacle(piece)
 
+    # Build a bucket around a target pose that represents where a resting part's centre should be.
     @staticmethod
     def _add_bucket(env, pose, colour):
         """Add an open-top bucket whose target pose is the resting part centre."""
         wall_offset = BUCKET_WIDTH / 2 - BUCKET_WALL_THICKNESS / 2
         floor_center = SE3(0, 0, -PART_RADIUS - FLOOR_THICKNESS / 2)
         wall_center_z = -PART_RADIUS + BUCKET_WALL_HEIGHT / 2
+        # The floor sits below the part centre and the walls line up around the open top.
         pieces = [
             Cuboid(
                 scale=[BUCKET_WIDTH, BUCKET_WIDTH, FLOOR_THICKNESS],

@@ -11,6 +11,7 @@ else:
     from collision import in_collision
 
 
+# I use this window to jog joints directly while keeping limits and obstacles in view.
 def run_manual_control(tx2_60, env, step_dt=0.02):
     """Open the joint-angle GUI and step Swift until the window is closed.
 
@@ -22,6 +23,7 @@ def run_manual_control(tx2_60, env, step_dt=0.02):
     root = tk.Tk()
     root.title("TX2-60 manual joint control")
 
+        # Build one degree-based slider per joint, but keep the robot's radian limits underneath.
     sliders = []
     value_labels = []
     for i in range(robot.n):
@@ -46,6 +48,7 @@ def run_manual_control(tx2_60, env, step_dt=0.02):
     collision_label = ttk.Label(root, text="", padding=(8, 0, 8, 8))
     collision_label.pack()
 
+        # The reset button sends every slider back to the saved standby pose.
     def reset():
         for var, q in zip(sliders, tx2_60.q_standby):
             var.set(float(np.rad2deg(q)))
@@ -55,7 +58,9 @@ def run_manual_control(tx2_60, env, step_dt=0.02):
     running = {"on": True}
     root.protocol("WM_DELETE_WINDOW", lambda: running.update(on=False))
 
+        # Remember a known collision-free pose so a blocked slider move can be undone.
     last_safe = np.asarray(robot.q, dtype=float).copy()
+        # Poll the sliders, reject collisions, update the held part, and advance Swift.
     while running["on"]:
         q = np.deg2rad([var.get() for var in sliders])
         hit = bool(tx2_60.obstacles) and in_collision(robot, q, tx2_60.obstacles)
@@ -67,16 +72,19 @@ def run_manual_control(tx2_60, env, step_dt=0.02):
         else:
             last_safe = q.copy()
         robot.q = q
+                # Keep a grasped object fixed relative to the gripper while joints are jogged.
         if tx2_60.attached_object is not None:
             tx2_60.attached_object.T = tx2_60.get_ee_pose() @ tx2_60.grasp_offset
         for label, angle in zip(value_labels, np.rad2deg(q)):
             label.config(text=f"{angle:7.1f}°")
+                # Show the forward-kinematics position so joint changes are easy to interpret.
         xyz = tx2_60.get_ee_pose().t
         pose_label.config(text=f"End-effector: x={xyz[0]:.3f}  y={xyz[1]:.3f}  z={xyz[2]:.3f} m")
         collision_label.config(
             text="COLLISION - move blocked" if hit else "No collision",
             foreground="red" if hit else "green",
         )
+                # A small simulation step keeps the GUI and visual scene moving together.
         env.step(step_dt)
         root.update()
     root.destroy()

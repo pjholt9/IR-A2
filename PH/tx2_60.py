@@ -13,6 +13,7 @@ else:
     from collision import in_collision
 
 
+# i keep the arm model, sorting sequence, and runtime state together here
 class TX2_60:
     """Staubli TX2-60 sorting arm.
 
@@ -28,6 +29,7 @@ class TX2_60:
     an image, it doesn't feed image error back into the arm's motion.
     """
 
+        # These shared settings keep the sorter and its visual model consistent.
     COLOURS = ("red", "green", "blue", "black", "brown")
     MESH_COLOR = "#ffff00"
     MESH_FILES = (
@@ -39,6 +41,7 @@ class TX2_60:
         "five_Link.STL",
         "six_Link.STL",
     )
+        # Each offset places an STL link model onto the matching DH link frame.
     MESH_OFFSETS = (
         SE3.RPY([-pi / 2, 0, 0], order="zyx"),
         SE3(-0.05, 0, 0),
@@ -54,6 +57,7 @@ class TX2_60:
     WAIT_STEP = 0.05
     MAX_WAIT = 60.0
 
+        # Set up the robot, workcell bookkeeping, and optional sensing/safety hooks.
     def __init__(self, base=SE3(), use_meshes=True):
         self.robot = None
         self.tx2_60_plot = None
@@ -81,6 +85,7 @@ class TX2_60:
         self.safety = None
         self.sense_size = 0.12
 
+        # Treat the current scene as known so later arrivals can be detected.
     def enable_sensing(self, env, size=0.12):
         """Treat everything in the scene now as known; later arrivals are detected as obstacles.
 
@@ -91,6 +96,7 @@ class TX2_60:
         self.sense_size = size
         self.known_objects = {id(o) for o in env.swift_objects}
 
+        # Track new shapes as simple obstacle proxies and keep their poses up to date.
     def _sense(self, env):
         """Register newly appeared shapes as obstacles and refresh the poses of tracked ones."""
         if not self.sensing:
@@ -106,12 +112,14 @@ class TX2_60:
         for obj, box in self.sensed.values():
             box.T = obj.T
 
+        # Register a cuboid and, if needed, its animation callback for wait loops.
     def add_obstacle(self, cuboid, update=None):
         """Register a cuboid to avoid; update(dt) is an optional callback that moves it each step."""
         self.obstacles.append(cuboid)
         if update is not None:
             self.step_hooks.append(update)
 
+        # Keep the DH base and visible base mesh aligned in the world.
     def update_base(self):
         """Sync the robot's base transform with self.base."""
         self.robot.base = self.base
@@ -120,8 +128,10 @@ class TX2_60:
             self.base_mesh._changed = True
         return self.robot.base
 
+        # Build the six-link standard-DH model using the arm dimensions and joint limits.
     def create_robot(self):
         """Build the DH model of the Staubli TX2-60 arm."""
+                # These DH parameters encode each joint's link offset, length, twist, and travel.
         l1 = DHLink(d=0.375, a=0.050, alpha=-pi / 2, qlim=[-pi, pi])
         l2 = DHLink(d=0.0, a=0.290, alpha=0, qlim=[-127.5 * pi / 180, 127.5 * pi / 180])
         l3 = DHLink(d=0.020, a=0.0, alpha=-pi / 2, qlim=[-142.5 * pi / 180, 142.5 * pi / 180])
@@ -134,10 +144,12 @@ class TX2_60:
         self.update_base()
         return self.robot
 
+        # Return to the saved home joint configuration.
     def standby(self):
         """Return the robot to its default standby joint configuration."""
         self.robot.q = self.q_standby.copy()
 
+        # Use detailed STL visuals when available, otherwise draw the cylinder fallback.
     def create_mesh_robot(self, env):
         """Add STL link visuals, or the cylinder fallback, to the Swift environment."""
         self.update_base()
@@ -148,6 +160,7 @@ class TX2_60:
             if not (mesh_dir / filename).is_file()
         ]
 
+                # Attach each mesh at its model offset so the visual links line up with the DH frames.
         if self.use_meshes and not missing:
             self.link_meshes = []
             for link_index, filename in enumerate(self.MESH_FILES[1:]):
@@ -187,10 +200,12 @@ class TX2_60:
         ).create_cylinders()
         env.add(self.tx2_60_plot)
 
+        # Read the tool pose from the current joints using forward kinematics.
     def get_ee_pose(self):
         """Return the current end-effector pose via forward kinematics."""
         return self.robot.fkine(self.robot.q)
 
+        # Interpolate a joint-space move and carry any grasped part along with the tool.
     def move_to_q(self, env, q_target, steps=50):
         """Animate a joint-space move, dragging any attached object along with the end-effector."""
         # Trajectory generation: quintic polynomial per joint from the current q to the target,
@@ -209,6 +224,7 @@ class TX2_60:
                 hook(0.02)
         return self.robot.q
 
+        # Keep the simulation responsive while the latched e-stop holds the arm still.
     def _wait_for_safety(self, env):
         """Hold the arm still until the e-stop has been reset and restarted."""
         while self.safety is not None and self.safety.stopped:
@@ -216,6 +232,7 @@ class TX2_60:
             for hook in self.step_hooks:
                 hook(self.WAIT_STEP)
 
+        # Pause before moving if the proposed joint pose overlaps a sampled obstacle.
     def _wait_until_clear(self, env, q):
         """Hold the arm still while moving to q would put a link ellipsoid inside an obstacle."""
         waited = 0.0
@@ -234,6 +251,7 @@ class TX2_60:
             waited += self.WAIT_STEP
         self.waiting = False
 
+        # Solve the Cartesian target with numerical IK, then animate its joint solution.
     def move_to_pose(self, env, target_pose, steps=50):
         """Solve IK for a Cartesian target pose, then animate the move to it."""
         # Inverse kinematics: Levenberg-Marquardt (damped numerical IK), seeded with the current
@@ -243,6 +261,7 @@ class TX2_60:
             raise RuntimeError(f"IK failed for target pose:\n{target_pose}")
         return self.move_to_q(env, self._nearest_q(q_sol.q), steps)
 
+        # Prefer an equivalent joint angle near the current pose without breaking limits.
     def _nearest_q(self, q_target):
         """Shift each joint by whole turns to the equivalent angle closest to the current one."""
         q_now = self.robot.q
@@ -252,6 +271,7 @@ class TX2_60:
         ok = (q_near >= qlim[:, 0]) & (q_near <= qlim[:, 1])
         return np.where(ok, q_near, q_target)
 
+        # Aim the tool down at a target and choose yaw from its direction relative to the base.
     def _downward_pose(self, pose, height=0.0):
         """Make a target pose with the tool's z-axis pointing down, optionally raised vertically."""
         pose = SE3(pose)
@@ -263,6 +283,7 @@ class TX2_60:
         # Rx(pi) flips the tool z-axis to point down, so the gripper approaches from above
         return SE3(position) * SE3.Rz(yaw) * SE3.Rx(pi)
 
+        # Approach from above, grasp, then lift so the part clears the surrounding rim.
     def pick(self, obj, env, approach_height=None, steps=50):
         """Move above the object, descend, grasp it, then retreat to the approach height."""
         obj_pose = SE3(obj.T) if hasattr(obj, "T") else SE3(obj)
@@ -278,6 +299,7 @@ class TX2_60:
         # Leg 3: lift straight back up before travelling, so the part clears the bucket rim
         self.move_to_pose(env, self._downward_pose(obj_pose, self.GRASP_HEIGHT + approach_height), steps)
 
+        # Lower the carried part into the bin, release it, and retreat above the rim.
     def place(self, bin_pose, env, approach_height=None, steps=50):
         """Move above the target bin, lower the object, release it, then retreat."""
         approach_height = self.APPROACH_HEIGHT if approach_height is None else approach_height
@@ -290,6 +312,7 @@ class TX2_60:
         # Retreat upward so the arm leaves clear of the bin
         self.move_to_pose(env, self._downward_pose(bin_pose, self.GRASP_HEIGHT + approach_height), steps)
 
+        # Choose the colour destination and run the full pick-and-place sequence.
     def sort_part(self, env, obj, obj_colour, general_bucket_pose, colour_bucket_poses, steps=50):
         """Pick a part from the known general-bucket pose and place it in its colour bucket."""
         if obj_colour not in self.COLOURS or obj_colour not in colour_bucket_poses:
@@ -307,12 +330,14 @@ class TX2_60:
         self.place(bucket_pose, env, steps=steps)
         return obj_colour
 
+        # Add a part to the work queue and mark it as ours, not a sensed intruder.
     def queue_part(self, obj, obj_colour):
         """Add a part to the queue of parts awaiting sorting."""
         self.pending_parts.append((obj, obj_colour))
         # Queued parts are the arm's own work, not intruders
         self.known_objects.add(id(obj))
 
+        # Work through queued parts and return to standby between placements.
     def run(self, env, general_bucket_pose, colour_bucket_poses, steps=50, idle_step=0.05, on_sorted=None):
         """Continuously sort queued parts, only checking for new work once idle (not mid pick-and-place)."""
         while True:

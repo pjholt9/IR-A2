@@ -30,6 +30,7 @@ else:
     from tx2_60 import TX2_60
 
 
+# Build the open-top bucket from cuboids so the part can be visibly dropped inside.
 BUCKET_WIDTH = 0.24
 BUCKET_WALL_THICKNESS = 0.02
 BUCKET_WALL_HEIGHT = 0.15
@@ -37,10 +38,11 @@ PART_RADIUS = 0.035
 START_Q = np.deg2rad([0, -90, 0, 0, 0, 0])
 
 
+# Add a floor and four walls around the target pose while leaving the top clear.
 def add_bucket(env, pose, colour):
     """Add a simple open-top bucket at the part/drop target pose."""
     x, y, target_z = pose.t
-    floor_top = target_z - PART_RADIUS
+    floor_top = target_z - PART_RADIUS  # Leave the floor just below the part's centre at its target pose.
     floor_thickness = 0.02
     floor_center_z = floor_top - floor_thickness / 2
     wall_center_z = floor_top + BUCKET_WALL_HEIGHT / 2
@@ -77,6 +79,7 @@ def add_bucket(env, pose, colour):
         env.add(piece)
 
 
+# Set up the arm, buckets, and simulated camera, then keep supplying parts to the sorter.
 def main():
     env = swift.Swift()
     env.launch(realtime=True)
@@ -99,12 +102,14 @@ def main():
     # Keep the camera window responsive while the arm animates
     swift_step = env.step
 
+    # Pump the camera on every simulation step so its image window stays responsive during motion.
     def step_and_pump(*args, **kwargs):
         swift_step(*args, **kwargs)
         camera.pump()
 
     env.step = step_and_pump
 
+    # Simulate a detected part and enqueue it using the colour read from a sample image.
     def spawn_part():
         """Raise the object flag, show/classify a random camera image, and queue a part of that colour."""
         camera.object_present = True
@@ -115,6 +120,7 @@ def main():
         print(f"Detected part colour: {obj_colour}")
         tx2_60.queue_part(part, obj_colour)
 
+    # Close the previous image and kick off another sort once the current part is placed.
     def on_sorted(obj, obj_colour):
         """Close the image once the part is in its bucket, then bring in the next part."""
         camera.close_image()

@@ -16,6 +16,7 @@ else:
     from tx2_60 import TX2_60
 
 
+# These frame assumptions are what the calibration compares against the DH model.
 MESH_DIR = Path(__file__).resolve().parents[1] / "TX2_60meshes"
 URDF_ORIGINS = (
     ((0, -0.375, 0), (0, 0, 0)),
@@ -30,10 +31,12 @@ WRIST_HEIGHT = 0.975
 ANGLE_CHOICES = (0, pi / 2, -pi / 2)
 
 
+# Rebuild the URDF's cumulative poses so they can be compared link by link with DH frames.
 def urdf_frames():
     """Return the seven cumulative URDF link frames at the zero pose."""
     frames = [SE3()]
     for xyz, rpy in URDF_ORIGINS:
+        # Each fixed-joint origin is relative to the previous link, not the world frame.
         frames.append(
             frames[-1]
             * SE3(xyz)
@@ -42,6 +45,7 @@ def urdf_frames():
     return frames
 
 
+# Find a simple known pose first; it gives the later frame-by-frame comparison an anchor.
 def find_reference(robot):
     """Find the requested vertical configuration using the actual DH model."""
     candidates = (
@@ -60,12 +64,14 @@ def find_reference(robot):
     raise RuntimeError("No requested vertical q_ref was found in the DH search.")
 
 
+# Measure the relative orientation as an angle so the quarter-turn candidates can be ranked.
 def rotation_error(first, second):
-    relative = first.T @ second
+    relative = first.T @ second  # Relative orientation isolates the mismatch between frames.
     cosine = np.clip((np.trace(relative) - 1) / 2, -1, 1)
     return float(np.arccos(cosine))
 
 
+# The URDF and DH base axes differ, so pick the allowed quarter-turn that best lines them up.
 def choose_t_fix(dh_frames, frames_urdf):
     """Choose the quarter-turn candidate aligned with DH link 0 at q1=0."""
     candidates = [
@@ -81,12 +87,14 @@ def choose_t_fix(dh_frames, frames_urdf):
     )
 
 
+# Keep the calibration output compact and in the same xyz/RPY convention as the URDF.
 def print_transform(name, transform):
     xyz = np.round(transform.t, 6)
     rpy = np.round(transform.rpy(order=URDF_RPY_ORDER), 6)
     print(f"{name}: xyz={xyz.tolist()}, rpy_zyx={rpy.tolist()}")
 
 
+# Format each result as a ready-to-paste Python transform constant.
 def print_offset_constant(index, transform):
     xyz = np.round(transform.t, 6)
     rpy = np.round(transform.rpy(order=URDF_RPY_ORDER), 6)
@@ -97,6 +105,7 @@ def print_offset_constant(index, transform):
     )
 
 
+# Run the alignment and report both the fitted offsets and the model differences to watch for.
 def main():
     missing = [
         filename

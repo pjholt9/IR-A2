@@ -29,6 +29,7 @@ else:
     from scenery_PH import TABLE_TOP, SceneryPH
 
 # Set True to drive the joints by hand from a slider window instead of auto-sorting
+# These toggles let me swap between the assignment-style run and a few useful demo variations.
 MANUAL_CONTROL = False
 
 # Set True to open a separate E-STOP window that halts the arm during automatic running
@@ -45,6 +46,7 @@ APPLE_PERIOD = 8.0  # seconds per full back-and-forth cycle
 
 
 
+# Assemble the A2 workcell, feed simulated camera detections, and let the robot sort queued parts.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--headless", action="store_true")
@@ -72,12 +74,14 @@ def main():
     swift_step = env.step
     apple = {"t": 0.0, "mesh": None}
 
+    # Convert the apple's table-relative sweep into a world pose for the visualized obstacle.
     def apple_pose():
         """Apple position: sweeps back and forth along table-x, starting at one end."""
         phase = 2 * np.pi * (apple["t"] - APPLE_SPAWN_TIME) / APPLE_PERIOD
         x = -APPLE_SWEEP_X * np.cos(phase)
         return scenery.table_pose @ SE3(x, APPLE_Y, APPLE_HEIGHT)
 
+    # Add the apple after its delay, then move that same mesh on every environment step.
     def update_apple(dt):
         apple["t"] += dt
         if apple["t"] < APPLE_SPAWN_TIME:
@@ -89,6 +93,7 @@ def main():
             print(f"Apple entered the scene at t={apple['t']:.1f} s")
         apple["mesh"].T = apple_pose().A
 
+    # Keep the camera/E-stop windows responsive while advancing the optional apple animation.
     def step_and_pump(*args_, **kwargs):
         swift_step(*args_, **kwargs)
         camera.pump()
@@ -106,6 +111,7 @@ def main():
 
     sorted_parts = []
 
+    # Pretend a part arrived, classify a sample image, and pass the resulting part to the queue.
     def spawn_part():
         """Stand in for the teammate's drop: classify a random image and queue a part of that colour."""
         camera.object_present = True
@@ -116,12 +122,13 @@ def main():
         print(f"Detected part colour: {colour}")
         tx2_60.queue_part(part, colour)
 
+    # Check placement, then stop the short headless run or request the next part.
     def on_sorted(part, colour):
         camera.close_image()
         sorted_parts.append((part, colour))
         # Check the part ended inside its own colour bucket
         bucket = scenery.colour_bucket_poses[colour].t
-        distance = abs(part.T[:3, 3][:2] - bucket[:2]).max()
+        distance = abs(part.T[:3, 3][:2] - bucket[:2]).max()  # Compare x/y only; bucket height is not placement error.
         if distance > 0.05:
             raise AssertionError(f"{colour} part is {distance:.3f} m from its bucket")
         print(f"Sorted {colour} part into its bucket")

@@ -8,6 +8,7 @@ from ir_support_extra_parts.parts import part_mesh
 from spatialgeometry import Cuboid
 from spatialmath import SE3
 
+# Shared staging spot keeps inactive hazard meshes out of the workcell view.
 PARKED = (100.0, 100.0, -100.0)  # where inactive meshes are hidden
 PERSON_FORWARD_YAW = 0.0  # extra yaw if the person mesh's front isn't along its +x axis
 
@@ -27,9 +28,11 @@ VISITOR_SPEED = 1.2  # m/s
 VISITOR_PAUSE = 2.0  # seconds standing inside before walking out
 
 
+# Add/remove a moving apple from the robot's collision model as it crosses the work area.
 class Apple:
     """Moving obstacle. While active, the arm waits for it to clear instead of colliding."""
 
+    # The visible mesh and simple collision box move together; only the box is used for safety checks.
     def __init__(self, env, table_pose, tx2_60):
         self.table_pose = table_pose
         self.tx2_60 = tx2_60
@@ -41,6 +44,7 @@ class Apple:
         self.active = False
         self.t = 0.0
 
+    # Register the obstacle only while the demo is enabled so normal sorting is unaffected.
     def toggle(self):
         """Add the apple to the scene (and the arm's obstacle list), or take it away again."""
         self.active = not self.active
@@ -53,21 +57,26 @@ class Apple:
             self._set(SE3(*PARKED))
         return self.active
 
+    # Advance the sweep using elapsed time, rather than tying motion speed to frame rate.
     def update(self, dt):
         if not self.active:
             return
         self.t += dt
+        # Cosine gives a smooth reversal at each end of the apple's path.
         x = -APPLE_SWEEP_X * np.cos(2 * np.pi * self.t / APPLE_PERIOD)
         self._set(self.table_pose @ SE3(x, APPLE_Y, APPLE_HEIGHT))
 
+    # Keep the rendered apple and the arm's collision shape at exactly the same pose.
     def _set(self, pose):
         self.mesh.T = pose.A
         self.box.T = pose.A
 
 
+# Simple visitor state machine for demonstrating the open entrance light curtain.
 class Visitor:
     """Person who walks in along the side of the table and trips the light curtain (e-stop)."""
 
+    # Start parked, then move the person mesh along a lane expressed in table coordinates.
     def __init__(self, env, table_pose, estop):
         self.table_pose = table_pose
         self.estop = estop
@@ -79,11 +88,13 @@ class Visitor:
         self.timer = 0.0
         self.tripped = False
 
+    # Use the curtain boundary to report whether the visitor is actually inside the cell.
     @property
     def inside(self):
         """True while the person is past the light curtain."""
         return self.state != "idle" and self.pos[1] <= CURTAIN_Y
 
+    # Only start a new walk when idle, so repeated triggers cannot reset someone mid-demo.
     def trigger(self):
         if self.state == "idle":
             self.pos = np.array([VISITOR_LANE_X, VISITOR_START_Y])
@@ -91,6 +102,7 @@ class Visitor:
             self.tripped = False
             self._place(-np.pi / 2)
 
+    # Each state does one phase of the demo: enter/trip, pause, then walk back out.
     def update(self, dt):
         if self.state == "in":
             if self._walk_to(VISITOR_END_Y, dt, -np.pi / 2):
@@ -109,6 +121,7 @@ class Visitor:
                 self.mesh.T = SE3(*PARKED).A
                 print("Person left the cell")
 
+    # Clamp each frame's movement so the person stops on the destination instead of overshooting.
     def _walk_to(self, y, dt, yaw):
         """Step along the lane towards y; returns True once there."""
         step = VISITOR_SPEED * dt
@@ -116,6 +129,7 @@ class Visitor:
         self._place(yaw)
         return abs(self.pos[1] - y) < 1e-9
 
+    # Transform the table-local lane position into the world pose for the person model.
     def _place(self, yaw):
         pose = self.table_pose @ SE3(self.pos[0], self.pos[1], 0) @ SE3.Rz(yaw + PERSON_FORWARD_YAW)
         self.mesh.T = pose.A

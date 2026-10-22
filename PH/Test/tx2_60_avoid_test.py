@@ -15,17 +15,21 @@ else:
     from collision import in_collision
     from tx2_60 import TX2_60
 
+# These familiar degree values make the start/goal easy to picture before converting to radians.
 START_Q = np.deg2rad([0, -90, 0, 0, 0, 0])
 TARGET_Q = np.deg2rad([90, -45, 45, 0, 0, 0])
 
 
+# The avoidance test only needs step(), so it can run without starting a browser or renderer.
 class FakeEnv:
     """Headless stand-in for Swift so the test runs without a browser."""
 
+    # Match the environment interface without adding rendering or simulation side effects.
     def step(self, dt=0.0):
         pass
 
 
+# Build an obstacle that repeatedly crosses the arm's route between the two test poses.
 def make_scenario(env):
     robot = TX2_60()
     robot.q_standby = START_Q.copy()
@@ -35,6 +39,7 @@ def make_scenario(env):
     cuboid = Cuboid(scale=[0.15, 0.15, 0.6], pose=SE3(0.45, 0.475, 0.3), color="red")
     state = {"t": 0.0}
 
+    # The robot calls this as it steps, which keeps the cuboid moving during the path.
     def update(dt):
         state["t"] += dt
         y = 0.475 + 0.225 * np.sin(2 * np.pi * state["t"] / 6.0)
@@ -44,9 +49,11 @@ def make_scenario(env):
     return robot, cuboid
 
 
+# Watch for collisions on both trips and record whether the arm ever had to wait.
 def run(env, robot):
     log = {"collisions": 0, "waited": False}
 
+    # Observe each step through a hook rather than changing the motion being tested.
     def check(dt):
         if in_collision(robot.robot, robot.robot.q, robot.obstacles, margin=0.0):
             log["collisions"] += 1
@@ -61,6 +68,7 @@ def run(env, robot):
     return log
 
 
+# Main regression check: both moves should finish without intersecting the moving box.
 def test_avoids_moving_cuboid():
     env = FakeEnv()
     robot, _ = make_scenario(env)
@@ -69,6 +77,7 @@ def test_avoids_moving_cuboid():
     assert np.allclose(robot.robot.q, START_Q)
 
 
+# Sanity-check the detector against one nearby box and one clearly separated box.
 def test_collision_detected():
     robot = TX2_60()
     robot.create_robot()
@@ -78,6 +87,7 @@ def test_collision_detected():
     assert not in_collision(robot.robot, np.zeros(6), [far])
 
 
+# Direct execution runs headless checks or opens the moving-obstacle demo.
 if __name__ == "__main__":
     if "--headless" in sys.argv:
         test_collision_detected()
